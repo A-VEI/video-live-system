@@ -126,6 +126,18 @@ tr:hover td{background:#f9fafb}
     <button class="btn btn-primary" onclick="showAdd()">+ 添加设备</button>
   </div>
 
+  <!-- Web 视频开关 -->
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <div style="font-size:14px;font-weight:600;color:#111">Web 端视频观看</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:2px">关闭后仅 App 可观看视频</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="webVideoToggle" onchange="toggleWebVideo(this)">
+      <span class="slider"></span>
+    </label>
+  </div>
+
   <table>
     <thead>
       <tr><th>ID</th><th>名称</th><th>流地址</th><th>排序</th><th>显示</th><th>状态</th><th style="text-align:right">操作</th></tr>
@@ -175,6 +187,21 @@ tr:hover td{background:#f9fafb}
 <div class="toast" id="toast"></div>
 
 <script>
+// 隐藏管理入口: Ctrl+Shift+U
+document.addEventListener("keydown", function(e){
+  if(e.ctrlKey && e.shiftKey && e.key === "U"){
+    e.preventDefault();
+    location.href = "/users";
+  }
+});
+// 加载 Web 视频开关状态
+fetch('/api/settings')
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var t = document.getElementById('webVideoToggle');
+    if(t) t.checked = d.web_video_enabled == 1;
+  });
+
 function toggleDropdown(e) {
   e.stopPropagation();
   document.getElementById('userDropdown').classList.toggle('show');
@@ -216,6 +243,20 @@ function saveDevice() {
     fetch('/api/devices', {method:'POST', body:fd, headers:{'X-Requested-With':'XMLHttpRequest'}})
       .then(function(r){return r.json()}).then(function(d){ d.ok ? location.reload() : toast(d.msg,1); });
   }
+}
+
+function toggleWebVideo(checkbox) {
+  fetch('/api/settings/web_video', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+    body: JSON.stringify({value: checkbox.checked ? 1 : 0})
+  })
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok) toast(checkbox.checked ? 'Web 视频已开启' : 'Web 视频已关闭', 0);
+    else { checkbox.checked = !checkbox.checked; toast(d.msg || '操作失败', 1); }
+  })
+  .catch(function(){ checkbox.checked = !checkbox.checked; toast('网络错误', 1); });
 }
 
 function toggleDevice(id, checkbox) {
