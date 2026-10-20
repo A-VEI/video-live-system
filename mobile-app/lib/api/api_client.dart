@@ -1,19 +1,35 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
+
+/// 业务异常：带可展示的中文 message 与 HTTP 状态码。
+class ApiException implements Exception {
+  final String message;
+  final int? statusCode;
+  ApiException(this.message, {this.statusCode});
+
+  @override
+  String toString() => message;
+}
 
 class ApiClient {
   static late ApiClient _instance;
   late Dio _dio;
-  String _baseUrl = 'http://112.25.181.94:8119';
+  String _baseUrl = kDefaultBaseUrl;
   String? _phone;
+  String? _token;
+  String? _name;
+  String? _role;
 
   static Future<ApiClient> init({String? baseUrl}) async {
     _instance = ApiClient._();
-    if (baseUrl != null) _instance._baseUrl = baseUrl;
     final prefs = await SharedPreferences.getInstance();
+    _instance._baseUrl =
+        baseUrl ?? prefs.getString('base_url') ?? kDefaultBaseUrl;
     _instance._phone = prefs.getString('auth_phone');
+    _instance._token = prefs.getString('auth_token');
+    _instance._name = prefs.getString('auth_name');
+    _instance._role = prefs.getString('auth_role') ?? 'user';
     _instance._setupDio();
     return _instance;
   }
@@ -25,97 +41,323 @@ class ApiClient {
     _dio = Dio(BaseOptions(
       baseUrl: _baseUrl,
       connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 20),
+      headers: {'Accept': 'application/json'},
+      validateStatus: (s) => s != null && s < 500,
     ));
-    // Basic Auth: username=phone, password=phone
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) {
-        if (_phone != null) {
-          final cred = base64Encode(utf8.encode('$_phone:$_phone'));
-          options.headers['Authorization'] = 'Basic $cred';
+        if (_token != null) {
+          options.headers['Authorization'] = 'Bearer $_token';
+        }
+        // 兼容 Web 端 CSRF 装饰器
+        if (options.method != 'GET') {
+          options.headers['X-Requested-With'] = 'XMLHttpRequest';
         }
         handler.next(options);
       },
     ));
   }
 
-  Future<void> setPhone(String phone) async {
+  // ── 持久化 ──
+  Future<void> _saveSession({
+    required String phone,
+    required String token,
+    String? name,
+    String? role,
+  }) async {
     _phone = phone;
+    _token = token;
+    _name = name ?? phone;
+    _role = role ?? 'user';
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_phone', phone);
+    await prefs.setString('auth_token', token);
+    await prefs.setString('auth_name', _name!);
+    await prefs.setString('auth_role', _role!);
   }
 
   Future<void> clearAuth() async {
     _phone = null;
+    _token = null;
+    _name = null;
+    _role = 'user';
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_phone');
+    await prefs.remove('auth_token');
+    await prefs.remove('auth_name');
+    await prefs.remove('auth_role');
+  }
+
+  Future<void> setBaseUrl(String url) async {
+    final normalized = url.endsWith('/')
+        ? url.substring(0, url.length - 1)
+        : url;
+    _baseUrl = normalized;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('base_url', normalized);
+    _setupDio();
   }
 
   String? get phone => _phone;
+  String? get token => _token;
+  String? get displayName => _name;
+  String get role => _role ?? 'user';
+  bool get isAdmin => role == 'admin';
+  bool get isLoggedIn => _token != null && _phone != null;
   String get baseUrl => _baseUrl;
 
-  // ── Auth: Basic Auth (phone:phone) ──
-  Future<Map<String, dynamic>> login(String phone) async {
-    // 验证手机号是否在 htpasswd 中: 尝试访问受保护资源
-    final cred = base64Encode(utf8.encode('$phone:$phone'));
-    try {
-      final r = await Dio().get(
-        '$_baseUrl/video.html',
-        options: Options(headers: {'Authorization': 'Basic $cred'}),
-      );
-      if (r.statusCode == 200) {
-        await setPhone(phone);
-        return {'ok': true, 'phone': phone, 'name': phone, 'role': 'user'};
-      }
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
-        return {'ok': false, 'msg': '手机号未授权'};
-      }
+  Dio get dio => _dio;
+
+  Never _throwApiError(Response r, {String fallback = '请求失败'}) {
+    final data = r.data;
+    String msg = fallback;
+    if (data is Map && data['msg'] is String) {
+      msg = data['msg'] as String;
+    } else if (r.statusMessage != null && r.statusMessage!.isNotEmpty) {
+      msg = r.statusMessage!;
     }
-    return {'ok': false, 'msg': '网络错误'};
+    throw ApiException(msg, statusCode: r.statusCode);
+  }
+
+  // ── Auth ──
+  Future<Map<String, dynamic>> login(String phone, String password) async {
+    try {
+      final r = await _dio.post('/api/mobile/login',
+          data: {'phone': phone, 'password': password});
+      final data = r.data;
+      if (r.statusCode == 200 && data is Map && data['ok'] == true) {
+        await _saveSession(
+          phone: data['phone'] ?? phone,
+          token: data['token'] as String,
+          name: data['name'],
+          role: data['role'],
+        );
+        return {
+          'ok': true,
+          'phone': data['phone'] ?? phone,
+          'name': data['name'] ?? phone,
+          'role': data['role'] ?? 'user',
+          'must_change_password': data['must_change_password'] == true,
+        };
+      }
+      _throwApiError(r, fallback: '登录失败');
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: '登录失败');
+    }
+    return {'ok': false, 'msg': '登录失败'};
   }
 
   Future<Map<String, dynamic>> me() async {
-    return {'ok': true, 'phone': _phone, 'name': _phone, 'role': 'user'};
+    try {
+      final r = await _dio.get('/api/mobile/me');
+      final data = r.data;
+      if (r.statusCode == 200 && data is Map && data['ok'] == true) {
+        _name = data['name'] ?? _name;
+        _role = data['role'] ?? _role;
+        final prefs = await SharedPreferences.getInstance();
+        if (_name != null) await prefs.setString('auth_name', _name!);
+        if (_role != null) await prefs.setString('auth_role', _role!);
+        return {
+          'ok': true,
+          'phone': data['phone'] ?? _phone,
+          'name': _name,
+          'role': _role,
+          'must_change_password': data['must_change_password'] == true,
+        };
+      }
+      if (r.statusCode == 401) {
+        await clearAuth();
+        throw ApiException('登录已过期，请重新登录', statusCode: 401);
+      }
+      _throwApiError(r, fallback: '获取用户信息失败');
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: '获取用户信息失败');
+    }
+    return {'ok': false};
   }
 
-  // ── Streams: 硬编码 (纯 Nginx 无 API) ──
+  // ── Streams / Devices ──
   Future<List<dynamic>> getStreams() async {
-    return [
-      {'id': 1, 'name': '警情信息', 'url': 'http://192.168.181.106/live/0/hls.m3u8', 'proxy_url': '/proxy/192.168.181.106/live/0/hls.m3u8', 'sort': 1, 'enabled': 1},
-      {'id': 2, 'name': '一体化指挥平台', 'url': 'http://192.168.181.103/live/0/hls.m3u8', 'proxy_url': '/proxy/192.168.181.103/live/0/hls.m3u8', 'sort': 2, 'enabled': 1},
-      {'id': 3, 'name': '现场图传', 'url': 'http://192.168.181.105/live/0/hls.m3u8', 'proxy_url': '/proxy/192.168.181.105/live/0/hls.m3u8', 'sort': 3, 'enabled': 1},
-      {'id': 4, 'name': '无人机画面', 'url': 'http://192.168.181.104/live/0/hls.m3u8', 'proxy_url': '/proxy/192.168.181.104/live/0/hls.m3u8', 'sort': 4, 'enabled': 1},
-      {'id': 5, 'name': '社会面监控', 'url': 'http://192.168.181.101/live/0/hls.m3u8', 'proxy_url': '/proxy/192.168.181.101/live/0/hls.m3u8', 'sort': 5, 'enabled': 1},
-      {'id': 6, 'name': '全国应急指挥系统', 'url': 'http://192.168.181.102/live/0/hls.m3u8', 'proxy_url': '/proxy/192.168.181.102/live/0/hls.m3u8', 'sort': 6, 'enabled': 1},
-    ];
+    try {
+      final r = await _dio.get('/api/mobile/streams');
+      if (r.statusCode == 200 && r.data is List) {
+        return r.data as List;
+      }
+      if (r.statusCode == 401) {
+        await clearAuth();
+        throw ApiException('登录已过期，请重新登录', statusCode: 401);
+      }
+      _throwApiError(r, fallback: '获取频道失败');
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: '获取频道失败');
+    }
+    return [];
   }
 
-  // ── Proxy URL (Nginx 直接处理) ──
-  String proxyUrl(String streamUrl) {
-    final uri = Uri.parse(streamUrl);
-    return '$_baseUrl/proxy/${uri.host}${uri.path}';
+  Future<List<dynamic>> getDevices() async {
+    try {
+      final r = await _dio.get('/api/mobile/devices');
+      if (r.statusCode == 200 && r.data is List) return r.data as List;
+      if (r.statusCode == 403) throw ApiException('需要管理员权限', statusCode: 403);
+      _throwApiError(r, fallback: '获取设备失败');
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: '获取设备失败');
+    }
+    return [];
   }
 
-  // ── 版本检查 ──
+  Future<void> addDevice(Map<String, dynamic> d) =>
+      _mutate('/api/mobile/devices', method: 'POST', data: d);
+
+  Future<void> updateDevice(int id, Map<String, dynamic> d) =>
+      _mutate('/api/mobile/devices/$id', method: 'PUT', data: d);
+
+  Future<Map<String, dynamic>> toggleDevice(int id) async {
+    final r = await _raw('/api/mobile/devices/$id/toggle', method: 'PUT');
+    return r.data is Map ? Map<String, dynamic>.from(r.data as Map) : {'ok': true};
+  }
+
+  Future<void> deleteDevice(int id) =>
+      _mutate('/api/mobile/devices/$id', method: 'DELETE');
+
+  // ── Users ──
+  Future<List<dynamic>> getUsers() async {
+    try {
+      final r = await _dio.get('/api/mobile/users');
+      if (r.statusCode == 200 && r.data is List) return r.data as List;
+      if (r.statusCode == 403) throw ApiException('需要管理员权限', statusCode: 403);
+      _throwApiError(r, fallback: '获取用户失败');
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: '获取用户失败');
+    }
+    return [];
+  }
+
+  Future<Map<String, dynamic>> addUser(Map<String, dynamic> d) async {
+    final r = await _raw('/api/mobile/users', method: 'POST', data: d);
+    final body = r.data;
+    if (body is Map && body['ok'] == false) {
+      throw ApiException(body['msg']?.toString() ?? '操作失败',
+          statusCode: r.statusCode);
+    }
+    return body is Map ? Map<String, dynamic>.from(body as Map) : {'ok': true};
+  }
+
+  Future<void> updateUser(int id, Map<String, dynamic> d) =>
+      _mutate('/api/mobile/users/$id', method: 'PUT', data: d);
+
+  Future<Map<String, dynamic>> toggleUser(int id) async {
+    final r = await _raw('/api/mobile/users/$id/toggle', method: 'PUT');
+    return r.data is Map ? Map<String, dynamic>.from(r.data as Map) : {'ok': true};
+  }
+
+  Future<void> deleteUser(int id) =>
+      _mutate('/api/mobile/users/$id', method: 'DELETE');
+
+  Future<void> changePassword(String oldPassword, String newPassword) async {
+    await _mutate('/api/mobile/change-password',
+        method: 'POST',
+        data: {'old_password': oldPassword, 'new_password': newPassword});
+  }
+
+  // ── 版本 ──
   Future<Map<String, dynamic>?> checkVersion() async {
     try {
-      final r = await Dio().get('$_baseUrl/api/app/version');
-      return r.data;
-    } catch (_) {
-      return null;
+      final r = await Dio(BaseOptions(
+        baseUrl: _baseUrl,
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+      )).get('/api/app/version');
+      if (r.statusCode == 200 && r.data is Map) {
+        return Map<String, dynamic>.from(r.data as Map);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 把相对的 /proxy/... 补成绝对地址。
+  String absoluteUrl(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('/')) return '$_baseUrl$path';
+    return '$_baseUrl/$path';
+  }
+
+  // ── internals ──
+  Future<Response> _raw(String path, {String method = 'GET', data}) async {
+    try {
+      final r = await _dio.request<dynamic>(
+        path,
+        data: data,
+        options: Options(method: method),
+      );
+      if (r.statusCode == 401) {
+        await clearAuth();
+        throw ApiException('登录已过期，请重新登录', statusCode: 401);
+      }
+      if (r.statusCode == 403) {
+        throw ApiException('没有权限执行该操作', statusCode: 403);
+      }
+      if (r.statusCode != null && r.statusCode! >= 400) {
+        _throwApiError(r);
+      }
+      return r;
+    } on DioException catch (e) {
+      throw _mapDio(e);
     }
   }
 
-  // ── 管理接口 (设备/用户) — 纯 Nginx 不支持, 返回空 ──
-  Future<List<dynamic>> getDevices() async => getStreams();
-  Future<List<dynamic>> getUsers() async => [];
-  Future<void> addDevice(Map<String, dynamic> d) async {}
-  Future<void> updateDevice(int id, Map<String, dynamic> d) async {}
-  Future<Map<String, dynamic>> toggleDevice(int id) async => {'ok': true};
-  Future<void> deleteDevice(int id) async {}
-  Future<void> addUser(Map<String, dynamic> d) async {}
-  Future<void> updateUser(int id, Map<String, dynamic> d) async {}
-  Future<Map<String, dynamic>> toggleUser(int id) async => {'ok': true};
-  Future<void> deleteUser(int id) async {}
+  Future<void> _mutate(String path, {String method = 'GET', data}) async {
+    final r = await _raw(path, method: method, data: data);
+    final body = r.data;
+    if (body is Map && body['ok'] == false) {
+      throw ApiException(body['msg']?.toString() ?? '操作失败',
+          statusCode: r.statusCode);
+    }
+  }
+
+  ApiException _mapDio(DioException e, {String fallback = '网络错误'}) {
+    if (e.error is ApiException) return e.error as ApiException;
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return ApiException('网络超时，请检查网络或服务器地址', statusCode: e.response?.statusCode);
+      case DioExceptionType.connectionError:
+        return ApiException('无法连接服务器，请检查网络和服务器地址', statusCode: null);
+      case DioExceptionType.badResponse:
+        final code = e.response?.statusCode;
+        if (code == 401) return ApiException('登录已过期，请重新登录', statusCode: 401);
+        if (code == 403) return ApiException('没有权限或签名已过期', statusCode: 403);
+        if (code == 404) return ApiException('接口不存在，请确认服务器版本', statusCode: 404);
+        final data = e.response?.data;
+        if (data is Map && data['msg'] is String) {
+          return ApiException(data['msg'] as String, statusCode: code);
+        }
+        return ApiException('$fallback (HTTP $code)', statusCode: code);
+      default:
+        return ApiException(fallback, statusCode: e.response?.statusCode);
+    }
+  }
+}
+
+/// HLS / 通用 HTTP 错误的用户可读描述（video_player 失败时用）。
+String describePlayError(Object error) {
+  final text = error.toString();
+  if (text.contains('401') || text.contains('Unauthorized')) {
+    return '认证失败，请重新登录';
+  }
+  if (text.contains('403') || text.contains('forbidden') || text.contains('bad stream token')) {
+    return '播放凭证无效或已过期，请重试';
+  }
+  if (text.contains('502') || text.contains('stream offline')) {
+    return '视频源离线，请检查编码器或线路';
+  }
+  if (text.contains('504') || text.contains('stream timeout') || text.contains('Timeout')) {
+    return '拉流超时，请检查网络';
+  }
+  if (text.contains('SocketException') || text.contains('Connection')) {
+    return '网络连接失败';
+  }
+  return '视频加载失败';
 }

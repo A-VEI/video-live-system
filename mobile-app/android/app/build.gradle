@@ -12,8 +12,9 @@ android {
         applicationId "com.szxf.video_live"
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName "1.0.0"
+        // 与 pubspec.yaml version: 1.0.4+4 对齐（CI 可覆盖）
+        versionCode 4
+        versionName "1.0.4"
     }
 
     buildTypes {

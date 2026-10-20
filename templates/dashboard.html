@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -140,7 +140,7 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
     <div class="chan-list">
       {% for s in streams %}
       <div class="chan" data-id="{{ s['id'] }}" data-name="{{ s['name'] }}"
-           data-url="{{ s['url'] }}" onclick="playStream(this)">
+           data-url="{{ s['url'] }}" data-proxy="{{ s['proxy_url'] }}" onclick="playStream(this)">
         <div class="chan-info">
           <div class="chan-name">{{ s['name'] }}</div>
           <div class="chan-meta">点击播放</div>
@@ -223,7 +223,9 @@ function playStream(el) {
   document.getElementById('livePill').classList.add('show');
 
   if (hls) { hls.destroy(); hls = null; }
-  var proxyUrl = url.replace(/^http:\/\//, '/proxy/');
+  // 方案 B：优先使用服务端签发的 proxy_url（含 exp+sig）
+  var proxyUrl = el.getAttribute('data-proxy') ||
+                 url.replace(/^http:\/\//, '/proxy/');
 
   if (Hls.isSupported()) {
     hls = new Hls({

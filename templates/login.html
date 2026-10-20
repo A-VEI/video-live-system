@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -16,7 +16,7 @@ h1{font-size:24px;font-weight:700;color:#111;letter-spacing:-.5px;margin-bottom:
 .sub{font-size:14px;color:#666;margin-bottom:32px}
 .form{margin-top:8px}
 input{width:100%;padding:14px 16px;border:1.5px solid #e5e7eb;border-radius:12px;
-      font-size:15px;outline:none;transition:all .2s;background:#fafafa}
+      font-size:15px;outline:none;transition:all .2s;background:#fafafa;margin-top:12px}
 input:focus{border-color:#2563eb;background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
 input::placeholder{color:#9ca3af}
 .btn{width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;
@@ -30,9 +30,10 @@ input::placeholder{color:#9ca3af}
 <body>
 <div class="login">
   <h1>视频直播系统</h1>
-  <div class="sub">请登录后查看直播画面</div>
+  <div class="sub">手机号 + 口令登录</div>
   <form method="post" class="form">
     <input type="tel" name="phone" placeholder="手机号" maxlength="11" autofocus>
+    <input type="password" name="password" placeholder="口令" autocomplete="current-password">
     <button type="submit" class="btn">登录</button>
     {% if error %}<div class="err">{{ error }}</div>{% endif %}
   </form>

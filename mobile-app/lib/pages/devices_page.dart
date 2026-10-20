@@ -22,8 +22,12 @@ class _DevicesPageState extends State<DevicesPage> {
     try {
       final data = await ApiClient.instance.getDevices();
       setState(() { _devices = data; _loading = false; });
-    } catch (_) {
+    } catch (e) {
+      if (!mounted) return;
       setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : '加载失败')),
+      );
     }
   }
 

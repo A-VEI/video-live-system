@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-app
     steps:
       - uses: actions/checkout@v4
 
@@ -22,27 +25,41 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate Android scaffolding
+      # Android 工程已提交进仓库，禁止 flutter create 覆盖 Manifest/FileProvider/图标
+      - name: Verify Android project
         run: |
-          # Backup our lib/ code
-          cp -r mobile-app/lib /tmp/lib_backup
-          cp mobile-app/pubspec.yaml /tmp/pubspec_backup.yaml
-          # Generate proper Android scaffolding
-          cd mobile-app
-          flutter create --org com.szxf --project-name video_live --platforms android .
-          # Restore our code
-          rm -rf lib
-          cp -r /tmp/lib_backup lib
-          cp /tmp/pubspec_backup.yaml pubspec.yaml
-          flutter pub get
+          test -f android/app/src/main/AndroidManifest.xml
+          test -f android/app/src/main/kotlin/com/szxf/video_live/MainActivity.kt
+          test -f android/app/src/main/res/xml/file_paths.xml
+          grep -q 'usesCleartextTraffic' android/app/src/main/AndroidManifest.xml
+
+      - name: Install deps
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos || true
 
       - name: Build APK
+        run: flutter build apk --release
+        env:
+          # 覆盖默认服务器；不传则用 config.dart 中默认值
+          BASE_URL: ${{ vars.BASE_URL || 'http://112.25.181.94:8119' }}
+
+      - name: Sync server VERSION
         run: |
-          cd mobile-app
-          flutter build apk --release
+          # 从 pubspec version 提取 1.0.3 → ../VERSION
+          V=$(grep -E '^version:' pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
+          echo "$V" > ../VERSION
+          echo "App version=$V" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: video-live-apk
           path: mobile-app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload VERSION
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-version
+          path: VERSION

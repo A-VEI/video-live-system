@@ -1,30 +1,46 @@
-﻿import 'dart:io';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
+import '../config.dart';
 
-/// 当前 App 版本 (每次发布递增)
-const String kAppVersion = '1.0.2';
+/// 运行时读取构建版本（pubspec.version → versionName），作为版本号单一来源。
+class AppVersion {
+  static String? _cached;
+
+  static Future<String> current() async {
+    if (_cached != null) return _cached!;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      _cached = info.version.isNotEmpty ? info.version : kFallbackAppVersion;
+    } catch (_) {
+      _cached = kFallbackAppVersion;
+    }
+    return _cached!;
+  }
+}
 
 class UpdateService {
   static Future<Map<String, dynamic>?> checkUpdate() async {
     try {
-      final resp = await Dio().get(
-        '${ApiClient.instance.baseUrl}/api/app/version',
-        options: Options(sendTimeout: const Duration(seconds: 10)),
-      );
-      final data = resp.data;
+      final current = await AppVersion.current();
+      final data = await ApiClient.instance.checkVersion();
+      if (data == null) return null;
       final latestVersion = data['version'] as String?;
       if (latestVersion == null) return null;
 
-      if (_compareVersion(latestVersion, kAppVersion) > 0) {
+      if (_compareVersion(latestVersion, current) > 0) {
+        final updateUrl = data['update_url']?.toString() ?? '/api/app/download';
         return {
           'version': latestVersion,
-          'current': kAppVersion,
-          'update_url': '${ApiClient.instance.baseUrl}${data['update_url']}',
+          'current': current,
+          'update_url': ApiClient.instance.absoluteUrl(updateUrl),
           'notes': data['notes'] ?? '',
+          'sha256': data['sha256'] ?? '',
         };
       }
     } catch (e) {
@@ -46,10 +62,11 @@ class UpdateService {
 
   static Future<void> downloadAndInstall(
     String url,
-    void Function(double) onProgress,
-  ) async {
-    // 用外部存储目录 (FileProvider 能访问)
-    final dir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
+    void Function(double) onProgress, {
+    String? expectSha256,
+  }) async {
+    final dir =
+        await getExternalStorageDirectory() ?? await getTemporaryDirectory();
     final savePath = '${dir.path}/video-live-update.apk';
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 30),
@@ -62,9 +79,23 @@ class UpdateService {
         if (total > 0) onProgress(received / total);
       },
     );
-    // 安装 APK
+    // P3: APK 完整性校验，防止中间人换包
+    if (expectSha256 != null && expectSha256.isNotEmpty) {
+      final digest = await _fileSha256(savePath);
+      if (digest.toLowerCase() != expectSha256.toLowerCase()) {
+        try {
+          File(savePath).deleteSync();
+        } catch (_) {}
+        throw Exception('APK 校验失败，已丢弃安装包');
+      }
+    }
     final result = await OpenFilex.open(savePath);
     debugPrint('install result: ${result.type}');
+  }
+
+  static Future<String> _fileSha256(String path) async {
+    final bytes = await File(path).readAsBytes();
+    return sha256.convert(bytes).toString();
   }
 }
 
@@ -91,14 +122,20 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     setState(() => _downloading = true);
     try {
       await UpdateService.downloadAndInstall(
-        widget.update['update_url'],
-        (p) => setState(() => _progress = p),
+        widget.update['update_url'] as String,
+        (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+        expectSha256: widget.update['sha256'] as String?,
       );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('更新失败: $e')));
-        setState(() { _downloading = false; _progress = 0; });
+        setState(() {
+          _downloading = false;
+          _progress = 0;
+        });
       }
     }
   }
@@ -113,8 +150,9 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         children: [
           Text('当前版本: ${widget.update['current']}'),
           const SizedBox(height: 8),
-          if (widget.update['notes']?.isNotEmpty == true)
-            Text(widget.update['notes'], style: TextStyle(color: Colors.grey[600])),
+          if (widget.update['notes']?.toString().isNotEmpty == true)
+            Text(widget.update['notes'].toString(),
+                style: TextStyle(color: Colors.grey[600])),
           const SizedBox(height: 16),
           if (_downloading) ...[
             LinearProgressIndicator(value: _progress > 0 ? _progress : null),

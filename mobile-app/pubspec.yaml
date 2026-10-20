@@ -1,7 +1,9 @@
-﻿name: video_live
+name: video_live
 description: Video live streaming app
 publish_to: 'none'
-version: 1.0.0+1
+# 版本号单一来源：构建后写入 versionName，运行时由 package_info_plus 读取
+# 服务端 VERSION 文件需与此主版本号对齐
+version: 1.0.4+4
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -15,6 +17,8 @@ dependencies:
   cupertino_icons: ^1.0.6
   open_filex: ^4.5.0
   path_provider: ^2.1.0
+  package_info_plus: ^8.0.0
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

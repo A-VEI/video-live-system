@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../api/api_client.dart';
@@ -16,6 +17,9 @@ class _VideoPageState extends State<VideoPage> {
   VideoPlayerController? _videoCtrl;
   bool _loading = true;
   bool _videoLoading = false;
+  String? _error;
+  bool _isLive = true;
+  Timer? _liveTimer;
 
   @override
   void initState() {
@@ -25,61 +29,120 @@ class _VideoPageState extends State<VideoPage> {
 
   @override
   void dispose() {
+    _liveTimer?.cancel();
     _videoCtrl?.dispose();
     super.dispose();
   }
 
   Future<void> _loadStreams() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final data = await ApiClient.instance.getStreams();
-      setState(() { _streams = data; _loading = false; });
+      if (!mounted) return;
+      setState(() {
+        _streams = data;
+        _loading = false;
+      });
     } catch (e) {
-      setState(() => _loading = false);
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e is ApiException ? e.message : '加载频道失败';
+      });
     }
   }
 
   Future<void> _playStream(int idx) async {
-    if (_activeIdx == idx) return;
+    if (_activeIdx == idx && _videoCtrl?.value.isPlaying == true) return;
     setState(() {
       _activeIdx = idx;
       _videoLoading = true;
+      _error = null;
     });
-    _videoCtrl?.dispose();
+    _liveTimer?.cancel();
+    final old = _videoCtrl;
+    _videoCtrl = null;
+    // 先释放旧控制器，避免闪烁时并发初始化
+    old?.dispose();
 
-    final stream = _streams[idx];
-    final url = ApiClient.instance.proxyUrl(stream['url']);
+    final stream = _streams[idx] as Map;
+    final rawProxy = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
+    final url = ApiClient.instance.absoluteUrl(rawProxy);
 
     try {
-      final vc = VideoPlayerController.networkUrl(Uri.parse(url),
+      final vc = VideoPlayerController.networkUrl(
+        Uri.parse(url),
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
       await vc.initialize();
-      // 跳到直播边沿 (最新画面)
-      if (vc.value.duration > const Duration(seconds: 5)) {
-        await vc.seekTo(vc.value.duration - const Duration(seconds: 3));
+      if (!mounted) {
+        vc.dispose();
+        return;
+      }
+
+      // 直播：不要 seekTo(duration-3) — live HLS 的 duration 常为 0/∞
+      final d = vc.value.duration;
+      final live = d.inMilliseconds <= 1 || d == Duration.zero;
+      if (!live && d > const Duration(seconds: 5)) {
+        // 点播/回放才允许贴边
+        await vc.seekTo(d - const Duration(seconds: 3));
       }
       await vc.play();
+
       setState(() {
         _videoCtrl = vc;
         _videoLoading = false;
+        _isLive = live;
       });
-    } catch (e) {
-      setState(() => _videoLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('视频加载失败: $e')),
-        );
+
+      // 定期贴直播边（仅 live），防止缓冲堆积越播越延后
+      if (live) {
+        _liveTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+          final c = _videoCtrl;
+          if (c == null || !c.value.isInitialized) return;
+          final pos = c.value.position;
+          final dur = c.value.duration;
+          if (dur.inMilliseconds > 1 && pos < dur - const Duration(seconds: 6)) {
+            c.seekTo(dur - const Duration(seconds: 2));
+          }
+        });
       }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _videoLoading = false;
+        _videoCtrl = null;
+        _error = describePlayError(e);
+      });
     }
   }
 
+  Future<void> _retryCurrent() async {
+    final idx = _activeIdx;
+    if (idx == null) return;
+    // 先刷新签名 URL 再重试
+    try {
+      final data = await ApiClient.instance.getStreams();
+      if (!mounted) return;
+      setState(() => _streams = data);
+    } catch (_) {}
+    await _playStream(idx);
+  }
+
   void _enterFullscreen() {
-    if (_videoCtrl == null) return;
-    // 推送独立全屏页面
+    final ctrl = _videoCtrl;
+    if (ctrl == null) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => _FullscreenVideoPage(controller: _videoCtrl!),
+        builder: (_) => _FullscreenVideoPage(
+          controller: ctrl,
+          title: _streams[_activeIdx!]['name']?.toString() ?? '',
+          isLive: _isLive,
+        ),
       ),
     );
   }
@@ -99,8 +162,29 @@ class _VideoPageState extends State<VideoPage> {
               alignment: Alignment.bottomCenter,
               children: [
                 VideoPlayer(_videoCtrl!),
+                if (_isLive)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'LIVE',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
                 _ControlsBar(
                   controller: _videoCtrl!,
+                  isLive: _isLive,
                   onFullscreen: _enterFullscreen,
                 ),
               ],
@@ -113,47 +197,84 @@ class _VideoPageState extends State<VideoPage> {
             child: Center(
               child: _videoLoading
                   ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text('选择下方频道开始观看',
-                      style: TextStyle(color: Colors.white54)),
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _error ?? '选择下方频道开始观看',
+                          style: TextStyle(
+                            color: _error != null
+                                ? Colors.orange[200]
+                                : Colors.white54,
+                            fontSize: 14,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        if (_error != null) ...[
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: _retryCurrent,
+                            child: const Text('重试'),
+                          ),
+                        ],
+                      ],
+                    ),
             ),
           ),
+        if (_error != null && _videoCtrl == null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(_error!,
+                style: TextStyle(color: Colors.red[400], fontSize: 12)),
+          ),
         Expanded(
-          child: ListView.builder(
-            itemCount: _streams.length,
-            itemBuilder: (_, i) {
-              final s = _streams[i];
-              final isActive = _activeIdx == i;
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: isActive
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.grey[200],
-                  child: Text('${i + 1}',
-                      style: TextStyle(
-                        color: isActive ? Colors.white : Colors.grey[600],
-                        fontWeight: FontWeight.bold,
-                      )),
-                ),
-                title: Text(s['name'] ?? '',
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(isActive ? '正在播放…' : '点击播放',
+          child: RefreshIndicator(
+            onRefresh: _loadStreams,
+            child: ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: _streams.length,
+              itemBuilder: (_, i) {
+                final s = _streams[i] as Map;
+                final isActive = _activeIdx == i;
+                final enabled = s['enabled'] == 1 || s['enabled'] == true;
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: isActive
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey[200],
+                    child: Text('${i + 1}',
+                        style: TextStyle(
+                          color: isActive ? Colors.white : Colors.grey[600],
+                          fontWeight: FontWeight.bold,
+                        )),
+                  ),
+                  title: Text(s['name']?.toString() ?? '',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    !enabled
+                        ? '已停用'
+                        : isActive
+                            ? '正在播放…'
+                            : '点击播放',
                     style: TextStyle(
                         fontSize: 12,
                         color: isActive
                             ? Theme.of(context).colorScheme.primary
-                            : Colors.grey)),
-                trailing: Icon(
-                  isActive ? Icons.graphic_eq : Icons.play_circle_outline,
-                  color: isActive
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.grey,
-                ),
-                selected: isActive,
-                selectedTileColor:
-                    Theme.of(context).colorScheme.primary.withOpacity(0.05),
-                onTap: () => _playStream(i),
-              );
-            },
+                            : Colors.grey),
+                  ),
+                  trailing: Icon(
+                    isActive ? Icons.graphic_eq : Icons.play_circle_outline,
+                    color: isActive
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey,
+                  ),
+                  selected: isActive,
+                  selectedTileColor:
+                      Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                  onTap: enabled ? () => _playStream(i) : null,
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -164,7 +285,13 @@ class _VideoPageState extends State<VideoPage> {
 // ═══ 独立全屏页面 ═══
 class _FullscreenVideoPage extends StatefulWidget {
   final VideoPlayerController controller;
-  const _FullscreenVideoPage({required this.controller});
+  final String title;
+  final bool isLive;
+  const _FullscreenVideoPage({
+    required this.controller,
+    required this.title,
+    required this.isLive,
+  });
 
   @override
   State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
@@ -176,7 +303,6 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   @override
   void initState() {
     super.initState();
-    // 横屏 + 沉浸式
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -186,7 +312,6 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
 
   @override
   void dispose() {
-    // 恢复竖屏 + 状态栏
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
         overlays: SystemUiOverlay.values);
@@ -205,7 +330,6 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
         onTap: () => setState(() => _showControls = !_showControls),
         child: Stack(
           children: [
-            // 视频铺满全屏
             Positioned.fill(
               child: FittedBox(
                 fit: BoxFit.contain,
@@ -216,7 +340,6 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                 ),
               ),
             ),
-            // 顶部退出按钮
             if (_showControls)
               Positioned(
                 top: 0,
@@ -240,16 +363,32 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                                 color: Colors.white, size: 28),
                             onPressed: _exit,
                           ),
-                          const Text('返回',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 16)),
+                          Expanded(
+                            child: Text(
+                              widget.title,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 16),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (widget.isLive)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text('LIVE',
+                                  style: TextStyle(
+                                      color: Colors.white, fontSize: 11)),
+                            ),
                         ],
                       ),
                     ),
                   ),
                 ),
               ),
-            // 底部控制栏
             if (_showControls)
               Positioned(
                 bottom: 0,
@@ -266,6 +405,9 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                   child: ValueListenableBuilder(
                     valueListenable: widget.controller,
                     builder: (context, VideoPlayerValue value, _) {
+                      final label = widget.isLive
+                          ? '直播中'
+                          : '${_fmt(value.position)} / ${_fmt(value.duration)}';
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Row(
@@ -282,11 +424,9 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                                     : widget.controller.play();
                               },
                             ),
-                            Text(
-                              '${_fmt(value.position)} / ${_fmt(value.duration)}',
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 14),
-                            ),
+                            Text(label,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 14)),
                             const Spacer(),
                             IconButton(
                               icon: const Icon(Icons.fullscreen_exit,
@@ -316,9 +456,11 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
 // ═══ 控制栏（小窗模式）═══
 class _ControlsBar extends StatelessWidget {
   final VideoPlayerController controller;
+  final bool isLive;
   final VoidCallback onFullscreen;
   const _ControlsBar({
     required this.controller,
+    required this.isLive,
     required this.onFullscreen,
   });
 
@@ -327,6 +469,7 @@ class _ControlsBar extends StatelessWidget {
     return ValueListenableBuilder(
       valueListenable: controller,
       builder: (context, VideoPlayerValue value, _) {
+        final label = isLive ? '直播中' : '${_fmt(value.position)} / ${_fmt(value.duration)}';
         return Container(
           color: Colors.black54,
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -343,10 +486,8 @@ class _ControlsBar extends StatelessWidget {
                 },
               ),
               Expanded(
-                child: Text(
-                  '${_fmt(value.position)} / ${_fmt(value.duration)}',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
+                child: Text(label,
+                    style: const TextStyle(color: Colors.white, fontSize: 12)),
               ),
               IconButton(
                 icon: const Icon(Icons.fullscreen,

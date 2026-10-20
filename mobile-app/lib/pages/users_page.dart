@@ -22,8 +22,12 @@ class _UsersPageState extends State<UsersPage> {
     try {
       final data = await ApiClient.instance.getUsers();
       setState(() { _users = data; _loading = false; });
-    } catch (_) {
+    } catch (e) {
+      if (!mounted) return;
       setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : '加载失败')),
+      );
     }
   }
 
@@ -39,6 +43,7 @@ class _UsersPageState extends State<UsersPage> {
   Future<void> _showEdit({Map<String, dynamic>? user}) async {
     final phoneCtrl = TextEditingController(text: user?['phone'] ?? '');
     final nameCtrl = TextEditingController(text: user?['name'] ?? '');
+    final pwCtrl = TextEditingController();
     String role = user?['role'] ?? 'user';
 
     final result = await showDialog<bool>(
@@ -55,6 +60,15 @@ class _UsersPageState extends State<UsersPage> {
                 enabled: user == null),
               const SizedBox(height: 12),
               TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '姓名')),
+              const SizedBox(height: 12),
+              TextField(
+                controller: pwCtrl,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: user == null ? '口令（留空随机生成）' : '重置口令（留空不改）',
+                  helperText: '至少8位，不能与手机号相同',
+                ),
+              ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 value: role,
@@ -82,9 +96,21 @@ class _UsersPageState extends State<UsersPage> {
         'role': role,
         'enabled': 1,
       };
+      if (pwCtrl.text.isNotEmpty) {
+        data['password'] = pwCtrl.text;
+      }
       try {
         if (user == null) {
-          await ApiClient.instance.addUser(data);
+          final resp = await ApiClient.instance.addUser(data);
+          _load();
+          final temp = resp['temp_password']?.toString();
+          if (temp != null && temp.isNotEmpty && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              duration: const Duration(seconds: 12),
+              content: Text('已创建用户，初始口令: $temp（请转告并要求尽快修改）'),
+            ));
+          }
+          return;
         } else {
           await ApiClient.instance.updateUser(user['id'], data);
         }

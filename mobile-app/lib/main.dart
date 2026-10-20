@@ -4,9 +4,9 @@ import 'pages/login_page.dart';
 import 'pages/home_page.dart';
 import 'services/update_service.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ApiClient.init(baseUrl: 'http://112.25.181.94:8119');
+  await ApiClient.init();
   runApp(const VideoApp());
 }
 
@@ -24,6 +24,10 @@ class VideoApp extends StatelessWidget {
         brightness: Brightness.light,
       ),
       home: const AuthGate(),
+      routes: {
+        '/home': (_) => const HomePage(),
+        '/login': (_) => const LoginPage(),
+      },
     );
   }
 }
@@ -47,12 +51,32 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _checkAuth() async {
     final api = ApiClient.instance;
-    if (api.phone != null) {
-      setState(() { _loggedIn = true; _loading = false; });
-      _checkAppUpdate();
-      return;
+    if (api.isLoggedIn) {
+      // 校验 token 是否仍有效
+      try {
+        final me = await api.me();
+        final mustChange = me['must_change_password'] == true;
+        if (!mounted) return;
+        if (mustChange) {
+          // 强制改密后再进主页
+          setState(() { _loading = false; });
+          final changed = await showChangePasswordDialog(context, force: true);
+          if (changed == true) {
+            setState(() { _loggedIn = true; });
+          } else {
+            await api.clearAuth();
+            setState(() { _loggedIn = false; });
+          }
+        } else {
+          setState(() { _loggedIn = true; _loading = false; });
+        }
+      } catch (_) {
+        await api.clearAuth();
+        if (mounted) setState(() { _loggedIn = false; _loading = false; });
+      }
+    } else {
+      if (mounted) setState(() { _loading = false; });
     }
-    setState(() { _loading = false; });
     _checkAppUpdate();
   }
 
