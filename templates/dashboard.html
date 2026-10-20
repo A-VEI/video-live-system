@@ -126,8 +126,6 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
       </div>
       <div class="user-dropdown" id="userDropdown">
         {% if role == 'admin' %}
-        <a class="dropdown-item" href="/devices">设备管理</a>
-        <a class="dropdown-item" href="/users">用户管理</a>
         <div class="dropdown-divider"></div>
         {% endif %}
         <a class="dropdown-item danger" href="/logout">退出登录</a>
@@ -184,6 +182,14 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
 <script src="/static/hls.min.js"></script>
 <script>
 var hls = null, currentEl = null;
+
+// 隐藏管理入口: Ctrl+Shift+U
+document.addEventListener('keydown', function(e){
+  if(e.ctrlKey && e.shiftKey && e.key === 'U'){
+    e.preventDefault();
+    location.href = '/users';
+  }
+});
 
 function toggleDropdown(e) {
   e.stopPropagation();
