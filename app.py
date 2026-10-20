@@ -13,7 +13,7 @@ import requests
 from datetime import timedelta
 from functools import wraps
 from urllib.parse import urlparse
-from flask import (Flask, render_template, request, redirect,
+from flask import (Flask, render_template, request, redirect, send_file,
                    url_for, session, jsonify, g, Response, stream_with_context)
 
 app = Flask(__name__)
@@ -169,7 +169,14 @@ def init_db():
             ip       TEXT,
             time     TEXT DEFAULT (datetime('now','localtime'))
         );
+        CREATE TABLE IF NOT EXISTS settings (
+            key      TEXT PRIMARY KEY,
+            value    TEXT NOT NULL
+        );
     ''')
+    # 默认设置
+    if db.execute("SELECT COUNT(*) FROM settings WHERE key='web_video_enabled'").fetchone()[0] == 0:
+        db.execute("INSERT INTO settings (key,value) VALUES ('web_video_enabled','1')")
     if db.execute('SELECT COUNT(*) FROM streams').fetchone()[0] == 0:
         for s in DEFAULT_STREAMS:
             db.execute('INSERT INTO streams (name,url,sort) VALUES (?,?,?)',
@@ -215,6 +222,70 @@ def csrf_protect(f):
 
 
 # ── 页面 ──────────────────────────────────────────────────────
+# ── 首页: App 下载页 ──
+@app.route('/')
+def download_page():
+    # 如果已登录且 web 视频开启, 直接跳视频页
+    if 'phone' in session:
+        if _get_setting('web_video_enabled') == '1':
+            return redirect(url_for('video_page'))
+    return render_template('download.html')
+
+
+@app.route('/download/apk')
+def download_apk():
+    """口令验证后下载 APK"""
+    code = request.args.get('code', '')
+    if code != '8119':
+        return '口令错误', 403
+    apk_path = os.path.join(app.root_path, 'static', 'app', 'video-live.apk')
+    if not os.path.exists(apk_path):
+        return 'APK 文件不存在', 404
+    return send_file(apk_path, as_attachment=True, download_name='video-live.apk')
+
+
+@app.route('/video')
+@login_required
+def video_page():
+    """视频页 (受 web_video_enabled 控制)"""
+    if _get_setting('web_video_enabled') != '1':
+        return render_template('video_disabled.html')
+    db = get_db()
+    streams = db.execute('SELECT * FROM streams WHERE enabled=1 ORDER BY sort').fetchall()
+    return render_template('dashboard.html', streams=streams,
+                           name=session.get('name'), role=session.get('role'))
+
+
+# ── 设置辅助 ──
+def _get_setting(key, default='1'):
+    try:
+        db = get_db()
+        row = db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
+        return row['value'] if row else default
+    except Exception:
+        return default
+
+
+# ── 设置 API ──
+@app.route('/api/settings')
+@any_auth
+def api_get_settings():
+    return jsonify(web_video_enabled=int(_get_setting('web_video_enabled', '1')))
+
+
+@app.route('/api/settings/web_video', methods=['PUT'])
+@any_admin
+@csrf_protect
+def api_toggle_web_video():
+    data = request.get_json(force=True, silent=True) or request.form.to_dict() or {}
+    raw = data.get('value', data.get('enabled', 1))
+    val = str(int(raw))
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO settings (key,value) VALUES ('web_video_enabled',?)", (val,))
+    db.commit()
+    return jsonify(ok=True, web_video_enabled=int(val))
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -252,13 +323,7 @@ def logout():
     return redirect(url_for('login'))
 
 
-@app.route('/')
-@login_required
-def dashboard():
-    db = get_db()
-    streams = db.execute('SELECT * FROM streams WHERE enabled=1 ORDER BY sort').fetchall()
-    return render_template('dashboard.html', streams=streams,
-                           name=session.get('name'), role=session.get('role'))
+# (dashboard 已改为 video_page, 见上方)
 
 
 @app.route('/users')
