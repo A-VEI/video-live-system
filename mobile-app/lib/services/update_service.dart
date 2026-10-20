@@ -6,7 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
 
 /// 当前 App 版本 (每次发布递增)
-const String kAppVersion = '1.0.1';
+const String kAppVersion = '1.0.2';
 
 class UpdateService {
   static Future<Map<String, dynamic>?> checkUpdate() async {
