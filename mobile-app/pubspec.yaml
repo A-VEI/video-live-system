@@ -1,4 +1,4 @@
-name: video_live
+﻿name: video_live
 description: Video live streaming app
 publish_to: 'none'
 version: 1.0.0+1
@@ -13,6 +13,8 @@ dependencies:
   shared_preferences: ^2.2.0
   video_player: ^2.8.0
   cupertino_icons: ^1.0.6
+  open_filex: ^4.5.0
+  path_provider: ^2.1.0
 
 dev_dependencies:
   flutter_test:
