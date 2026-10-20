@@ -8,9 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile-app
     steps:
       - uses: actions/checkout@v4
 
@@ -25,11 +22,24 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Generate Android scaffolding
+        run: |
+          # Backup our lib/ code
+          cp -r mobile-app/lib /tmp/lib_backup
+          cp mobile-app/pubspec.yaml /tmp/pubspec_backup.yaml
+          # Generate proper Android scaffolding
+          cd mobile-app
+          flutter create --org com.szxf --project-name video_live --platforms android .
+          # Restore our code
+          rm -rf lib
+          cp -r /tmp/lib_backup lib
+          cp /tmp/pubspec_backup.yaml pubspec.yaml
+          flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release
+        run: |
+          cd mobile-app
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
