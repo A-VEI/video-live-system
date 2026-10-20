@@ -1,4 +1,4 @@
-import 'package:dio/dio.dart';
+﻿import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiClient {
@@ -114,9 +114,11 @@ class ApiClient {
     await _dio.delete('/api/mobile/users/$id');
   }
 
-  // ── Proxy URL helper ──
+  // ── Proxy URL helper (Nginx HLS 代理, 更快) ──
   String proxyUrl(String streamUrl) {
     final uri = Uri.parse(streamUrl);
-    return '$_baseUrl/proxy/${uri.host}${uri.path}';
+    // 用 Nginx 8120 端口代理, 比 Flask 快 10 倍+
+    final host = _baseUrl.replaceFirst(':8119', ':8120');
+    return '$host/proxy/${uri.host}${uri.path}';
   }
 }
