@@ -2,6 +2,7 @@
 import 'api/api_client.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
+import 'services/update_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,21 +50,30 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _checkAuth() async {
     final api = ApiClient.instance;
     if (api.token != null) {
-      // 有 token 就直接进, 网络问题也不清 token
       try {
         final me = await api.me();
         if (me['ok'] == true) {
           setState(() { _loggedIn = true; _loading = false; });
+          _checkAppUpdate();
           return;
         }
-        // 只有明确 401 才清 token
-      } catch (_) {
-        // 网络错误, 保留 token 仍然进入
-      }
+      } catch (_) {}
       setState(() { _loggedIn = true; _loading = false; });
+      _checkAppUpdate();
       return;
     }
     setState(() { _loading = false; });
+    _checkAppUpdate();
+  }
+
+  void _checkAppUpdate() {
+    Future.delayed(const Duration(seconds: 2), () async {
+      if (!mounted) return;
+      final update = await UpdateService.checkUpdate();
+      if (update != null && mounted) {
+        showUpdateDialog(context, update);
+      }
+    });
   }
 
   @override
