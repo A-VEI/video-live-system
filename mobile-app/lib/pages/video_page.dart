@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -19,7 +18,6 @@ class _VideoPageState extends State<VideoPage> {
   bool _videoLoading = false;
   String? _error;
   bool _isLive = true;
-  Timer? _liveTimer;
 
   @override
   void initState() {
@@ -29,7 +27,6 @@ class _VideoPageState extends State<VideoPage> {
 
   @override
   void dispose() {
-    _liveTimer?.cancel();
     _videoCtrl?.dispose();
     super.dispose();
   }
@@ -62,7 +59,6 @@ class _VideoPageState extends State<VideoPage> {
       _videoLoading = true;
       _error = null;
     });
-    _liveTimer?.cancel();
     final old = _videoCtrl;
     _videoCtrl = null;
     // 先释放旧控制器，避免闪烁时并发初始化
@@ -75,6 +71,8 @@ class _VideoPageState extends State<VideoPage> {
     try {
       final vc = VideoPlayerController.networkUrl(
         Uri.parse(url),
+        // 明确按 HLS 处理，交给 ExoPlayer 直播模式
+        formatHint: VideoFormat.hls,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
       await vc.initialize();
@@ -83,33 +81,15 @@ class _VideoPageState extends State<VideoPage> {
         return;
       }
 
-      // 直播：不要 seekTo(duration-3) — live HLS 的 duration 常为 0/∞
-      final d = vc.value.duration;
-      final live = d.inMilliseconds <= 1 || d == Duration.zero;
-      if (!live && d > const Duration(seconds: 5)) {
-        // 点播/回放才允许贴边
-        await vc.seekTo(d - const Duration(seconds: 3));
-      }
+      // 本系统全是直播：禁止 seekTo(duration-N)。
+      // HLS 窗口 duration 会被误判成点播，seek 会在 2s 分片边界反复卡顿。
       await vc.play();
 
       setState(() {
         _videoCtrl = vc;
         _videoLoading = false;
-        _isLive = live;
+        _isLive = true;
       });
-
-      // 定期贴直播边（仅 live），防止缓冲堆积越播越延后
-      if (live) {
-        _liveTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-          final c = _videoCtrl;
-          if (c == null || !c.value.isInitialized) return;
-          final pos = c.value.position;
-          final dur = c.value.duration;
-          if (dur.inMilliseconds > 1 && pos < dur - const Duration(seconds: 6)) {
-            c.seekTo(dur - const Duration(seconds: 2));
-          }
-        });
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -402,42 +382,7 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                       colors: [Colors.black54, Colors.transparent],
                     ),
                   ),
-                  child: ValueListenableBuilder(
-                    valueListenable: widget.controller,
-                    builder: (context, VideoPlayerValue value, _) {
-                      final label = widget.isLive
-                          ? '直播中'
-                          : '${_fmt(value.position)} / ${_fmt(value.duration)}';
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Row(
-                          children: [
-                            IconButton(
-                              icon: Icon(
-                                value.isPlaying ? Icons.pause : Icons.play_arrow,
-                                color: Colors.white,
-                                size: 40,
-                              ),
-                              onPressed: () {
-                                value.isPlaying
-                                    ? widget.controller.pause()
-                                    : widget.controller.play();
-                              },
-                            ),
-                            Text(label,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 14)),
-                            const Spacer(),
-                            IconButton(
-                              icon: const Icon(Icons.fullscreen_exit,
-                                  color: Colors.white, size: 36),
-                              onPressed: _exit,
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+                  child: _FullscreenBar(controller: widget.controller, onExit: _exit),
                 ),
               ),
           ],
@@ -446,15 +391,78 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
     );
   }
 
-  String _fmt(Duration d) {
-    final m = d.inMinutes.toString().padLeft(2, '0');
-    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
+
+}
+
+// 全屏底栏：只在播放状态变化时重建，不显示读秒
+class _FullscreenBar extends StatefulWidget {
+  final VideoPlayerController controller;
+  final VoidCallback onExit;
+  const _FullscreenBar({required this.controller, required this.onExit});
+  @override
+  State<_FullscreenBar> createState() => _FullscreenBarState();
+}
+
+class _FullscreenBarState extends State<_FullscreenBar> {
+  bool _playing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _playing = widget.controller.value.isPlaying;
+    widget.controller.addListener(_onTick);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTick);
+    super.dispose();
+  }
+
+  void _onTick() {
+    final p = widget.controller.value.isPlaying;
+    if (p != _playing && mounted) setState(() => _playing = p);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              _playing ? Icons.pause : Icons.play_arrow,
+              color: Colors.white,
+              size: 40,
+            ),
+            onPressed: () {
+              if (_playing) {
+                widget.controller.pause();
+              } else {
+                widget.controller.play();
+              }
+              setState(() => _playing = !_playing);
+            },
+          ),
+          const Text(
+            '直播',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 36),
+            onPressed: widget.onExit,
+          ),
+        ],
+      ),
+    );
   }
 }
 
 // ═══ 控制栏（小窗模式）═══
-class _ControlsBar extends StatelessWidget {
+// 只在播放/暂停状态变化时重建，避免 ValueListenableBuilder 每帧读 position 造成卡顿
+class _ControlsBar extends StatefulWidget {
   final VideoPlayerController controller;
   final bool isLive;
   final VoidCallback onFullscreen;
@@ -465,45 +473,72 @@ class _ControlsBar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: controller,
-      builder: (context, VideoPlayerValue value, _) {
-        final label = isLive ? '直播中' : '${_fmt(value.position)} / ${_fmt(value.duration)}';
-        return Container(
-          color: Colors.black54,
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Row(
-            children: [
-              IconButton(
-                icon: Icon(
-                  value.isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white,
-                  size: 28,
-                ),
-                onPressed: () {
-                  value.isPlaying ? controller.pause() : controller.play();
-                },
-              ),
-              Expanded(
-                child: Text(label,
-                    style: const TextStyle(color: Colors.white, fontSize: 12)),
-              ),
-              IconButton(
-                icon: const Icon(Icons.fullscreen,
-                    color: Colors.white, size: 28),
-                onPressed: onFullscreen,
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  State<_ControlsBar> createState() => _ControlsBarState();
+}
+
+class _ControlsBarState extends State<_ControlsBar> {
+  bool _playing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _playing = widget.controller.value.isPlaying;
+    widget.controller.addListener(_onTick);
   }
 
-  String _fmt(Duration d) {
-    final m = d.inMinutes.toString().padLeft(2, '0');
-    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTick);
+    super.dispose();
+  }
+
+  void _onTick() {
+    final p = widget.controller.value.isPlaying;
+    if (p != _playing && mounted) {
+      setState(() => _playing = p);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black54,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              _playing ? Icons.pause : Icons.play_arrow,
+              color: Colors.white,
+              size: 28,
+            ),
+            onPressed: () {
+              if (_playing) {
+                widget.controller.pause();
+              } else {
+                widget.controller.play();
+              }
+              setState(() => _playing = !_playing);
+            },
+          ),
+          // 直播：不显示 position/duration 读秒
+          const Expanded(
+            child: Text(
+              'LIVE',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.fullscreen, color: Colors.white, size: 28),
+            onPressed: widget.onFullscreen,
+          ),
+        ],
+      ),
+    );
   }
 }

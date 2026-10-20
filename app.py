@@ -542,22 +542,28 @@ def proxy_stream(stream_path):
             }
             return Response(body, status=resp.status_code, headers=headers)
 
-        resp = requests.get(target, stream=True, timeout=15,
-                            headers={'User-Agent': 'Mozilla/5.0'})
-        ct = resp.headers.get('Content-Type', 'application/octet-stream')
+        # ts/分片：整段缓冲后返回，避免 2s 边界流式卡顿
+        resp = requests.get(target, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
         if is_ts:
-            ct = 'video/mp2t'
-        else:
-            ct = ct.split(';')[0]
+            body = resp.content
+            headers = {
+                'Content-Type': 'video/mp2t',
+                # 直播分片不可长缓存，但短缓存可抹平 2s 边界抖动
+                'Cache-Control': 'public, max-age=2',
+                'Access-Control-Allow-Origin': '*',
+                'Content-Length': str(len(body)),
+            }
+            return Response(body, status=resp.status_code, headers=headers)
 
+        ct = resp.headers.get('Content-Type', 'application/octet-stream')
+        body = resp.content
         headers = {
-            'Content-Type': ct,
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Content-Type': ct.split(';')[0],
+            'Cache-Control': 'public, max-age=2',
             'Access-Control-Allow-Origin': '*',
-            'Pragma': 'no-cache',
+            'Content-Length': str(len(body)),
         }
-        return Response(stream_with_context(resp.iter_content(chunk_size=16384)),
-                        status=resp.status_code, headers=headers)
+        return Response(body, status=resp.status_code, headers=headers)
     except requests.exceptions.ConnectionError:
         return Response('stream offline', status=502)
     except requests.exceptions.Timeout:
