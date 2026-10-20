@@ -1,0 +1,250 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设备管理 - 视频直播系统</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+     background:#f0f2f5;color:#111;min-height:100vh}
+
+.topbar{height:56px;background:#fff;border-bottom:1px solid #e5e7eb;
+        display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+        box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.brand{display:flex;align-items:center;gap:12px}
+
+.brand-name{font-size:16px;font-weight:700;letter-spacing:-.3px}
+.topbar-right{display:flex;align-items:center;gap:20px}
+.user-menu{position:relative;cursor:pointer}
+.user-chip{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 5px;
+           border:1.5px solid #e5e7eb;border-radius:24px;transition:all .15s;background:#fff}
+.user-chip:hover{border-color:#2563eb}
+.user-avatar{width:28px;height:28px;background:linear-gradient(135deg,#2563eb,#3b82f6);
+             border-radius:50%;display:flex;align-items:center;justify-content:center;
+             font-size:12px;color:#fff;font-weight:700}
+.user-name{font-size:13px;font-weight:600;color:#374151}
+.user-dropdown{position:absolute;right:0;top:calc(100% + 8px);width:180px;
+               background:#fff;border:1px solid #e5e7eb;border-radius:12px;
+               padding:6px;display:none;z-index:100;box-shadow:0 4px 24px rgba(0,0,0,.1)}
+.user-dropdown.show{display:block}
+.dropdown-item{display:flex;align-items:center;gap:10px;padding:10px 12px;
+               border-radius:8px;font-size:13px;color:#374151;cursor:pointer;
+               transition:all .1s;text-decoration:none;font-weight:500}
+.dropdown-item:hover{background:#f3f4f6}
+.dropdown-item.danger:hover{background:#fef2f2;color:#dc2626}
+.dropdown-divider{height:1px;background:#e5e7eb;margin:4px 8px}
+
+.container{max-width:960px;margin:32px auto;padding:0 24px}
+.page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.page-title{font-size:24px;font-weight:700;letter-spacing:-.5px}
+.page-desc{font-size:14px;color:#6b7280;margin-top:4px}
+.btn{padding:10px 20px;border:none;border-radius:10px;font-size:13px;
+     font-weight:600;cursor:pointer;transition:all .15s}
+.btn-primary{background:#2563eb;color:#fff}
+.btn-primary:hover{background:#1d4ed8;transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,.25)}
+.btn-sm{padding:6px 12px;font-size:12px;border-radius:8px}
+.btn-ghost{background:#fff;border:1.5px solid #e5e7eb;color:#374151}
+.btn-ghost:hover{border-color:#2563eb;color:#2563eb}
+.btn-danger{background:#fff;border:1.5px solid #fecaca;color:#dc2626}
+.btn-danger:hover{background:#fef2f2}
+
+table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;
+      border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;
+      box-shadow:0 1px 3px rgba(0,0,0,.05)}
+th{background:#f9fafb;padding:12px 16px;text-align:left;font-size:11px;
+   color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+   border-bottom:1px solid #e5e7eb}
+td{padding:14px 16px;border-bottom:1px solid #f3f4f6;font-size:14px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f9fafb}
+.url-cell{font-family:'SF Mono','Consolas',monospace;font-size:12px;color:#6b7280;
+          max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.toggle{position:relative;width:44px;height:24px;cursor:pointer;display:inline-block}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;background:#d1d5db;border-radius:12px;transition:background .2s}
+.slider::before{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;
+                background:#fff;border-radius:50%;transition:transform .2s;
+                box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.toggle input:checked + .slider{background:#2563eb}
+.toggle input:checked + .slider::before{transform:translateX(20px)}
+
+.tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.tag-on{background:#ecfdf5;color:#059669}
+.tag-off{background:#fef2f2;color:#dc2626}
+
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;
+      display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.modal{background:#fff;border-radius:16px;padding:32px;width:460px;max-width:90vw;
+       box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.modal h3{font-size:18px;font-weight:700;margin-bottom:24px}
+.fg{margin-bottom:16px}
+.fg label{display:block;font-size:12px;color:#6b7280;margin-bottom:6px;font-weight:600;
+          text-transform:uppercase;letter-spacing:.5px}
+.fg input{width:100%;padding:12px 14px;border:1.5px solid #e5e7eb;
+  border-radius:10px;font-size:14px;outline:none;transition:all .15s;background:#fafafa}
+.fg input:focus{border-color:#2563eb;background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.modal-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:24px}
+
+.toast{position:fixed;top:24px;left:50%;transform:translateX(-50%);
+       padding:12px 24px;border-radius:10px;font-size:13px;z-index:200;
+       display:none;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.toast.ok{background:#059669;color:#fff}
+.toast.err{background:#dc2626;color:#fff}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-name">视频直播系统</div>
+  </div>
+  <div class="topbar-right">
+    <a href="/" style="color:#374151;text-decoration:none;font-size:13px;font-weight:600">视频主页</a>
+    <div class="user-menu" onclick="toggleDropdown(event)">
+      <div class="user-chip">
+        <div class="user-avatar">{{ (name or 'A')[0] }}</div>
+        <span class="user-name">{{ name or '管理员' }}</span>
+      </div>
+      <div class="user-dropdown" id="userDropdown">
+        <a class="dropdown-item" href="/devices">设备管理</a>
+        <a class="dropdown-item" href="/users">用户管理</a>
+        <div class="dropdown-divider"></div>
+        <a class="dropdown-item danger" href="/logout">退出登录</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="page-head">
+    <div>
+      <div class="page-title">设备管理</div>
+      <div class="page-desc">控制前端显示的视频设备，可开启或关闭</div>
+    </div>
+    <button class="btn btn-primary" onclick="showAdd()">+ 添加设备</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>ID</th><th>名称</th><th>流地址</th><th>排序</th><th>显示</th><th>状态</th><th style="text-align:right">操作</th></tr>
+    </thead>
+    <tbody>
+      {% for s in streams %}
+      <tr>
+        <td style="color:#9ca3af">{{ s['id'] }}</td>
+        <td style="font-weight:600">{{ s['name'] }}</td>
+        <td class="url-cell" title="{{ s['url'] }}">{{ s['url'] }}</td>
+        <td>{{ s['sort'] }}</td>
+        <td>
+          <label class="toggle">
+            <input type="checkbox" {% if s['enabled'] %}checked{% endif %}
+                   onchange="toggleDevice({{ s['id'] }}, this)">
+            <span class="slider"></span>
+          </label>
+        </td>
+        <td>
+          {% if s['enabled'] %}<span class="tag tag-on">显示中</span>
+          {% else %}<span class="tag tag-off">已隐藏</span>{% endif %}
+        </td>
+        <td style="text-align:right">
+          <button class="btn btn-sm btn-ghost" onclick="showEdit({{ s['id'] }},'{{ s['name'] }}','{{ s['url'] }}',{{ s['sort'] }})">编辑</button>
+          <button class="btn btn-sm btn-danger" onclick="delDevice({{ s['id'] }},'{{ s['name'] }}')" style="margin-left:6px">删除</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="mask" id="modal" style="display:none">
+  <div class="modal">
+    <h3 id="mTitle">添加设备</h3>
+    <input type="hidden" id="editId">
+    <div class="fg"><label>设备名称</label><input type="text" id="fName"></div>
+    <div class="fg"><label>流地址</label><input type="text" id="fUrl" placeholder="http://..."></div>
+    <div class="fg"><label>排序</label><input type="number" id="fSort" value="0" min="0"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveDevice()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toggleDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('userDropdown').classList.toggle('show');
+}
+document.addEventListener('click', function() {
+  var dd = document.getElementById('userDropdown');
+  if (dd) dd.classList.remove('show');
+});
+
+function showAdd() {
+  document.getElementById('mTitle').textContent = '添加设备';
+  document.getElementById('editId').value = '';
+  document.getElementById('fName').value = '';
+  document.getElementById('fUrl').value = '';
+  document.getElementById('fSort').value = '0';
+  document.getElementById('modal').style.display = 'flex';
+}
+function showEdit(id, name, url, sort) {
+  document.getElementById('mTitle').textContent = '编辑设备';
+  document.getElementById('editId').value = id;
+  document.getElementById('fName').value = name;
+  document.getElementById('fUrl').value = url;
+  document.getElementById('fSort').value = sort;
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+function saveDevice() {
+  var id = document.getElementById('editId').value;
+  var fd = new FormData();
+  fd.append('name', document.getElementById('fName').value);
+  fd.append('url', document.getElementById('fUrl').value);
+  fd.append('sort', document.getElementById('fSort').value);
+  if (id) {
+    fd.append('enabled', '1');
+    fetch('/api/devices/' + id, {method:'PUT', body:fd, headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(function(r){return r.json()}).then(function(d){ d.ok ? location.reload() : toast(d.msg,1); });
+  } else {
+    fetch('/api/devices', {method:'POST', body:fd, headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(function(r){return r.json()}).then(function(d){ d.ok ? location.reload() : toast(d.msg,1); });
+  }
+}
+
+function toggleDevice(id, checkbox) {
+  fetch('/api/devices/' + id + '/toggle', {method:'PUT', headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(function(r){return r.json()})
+    .then(function(d) {
+      if (d.ok) {
+        toast(d.enabled ? '已开启显示' : '已关闭显示', 0);
+        setTimeout(function(){ location.reload(); }, 500);
+      } else {
+        checkbox.checked = !checkbox.checked;
+        toast(d.msg, 1);
+      }
+    });
+}
+
+function delDevice(id, name) {
+  if (!confirm('确定删除设备「' + name + '」吗？')) return;
+  fetch('/api/devices/' + id, {method:'DELETE', headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(function(r){return r.json()}).then(function(d){ d.ok ? location.reload() : toast(d.msg,1); });
+}
+
+function toast(msg, isErr) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (isErr ? 'err' : 'ok');
+  t.style.display = 'block';
+  setTimeout(function(){ t.style.display = 'none'; }, 2500);
+}
+</script>
+</body>
+</html>
