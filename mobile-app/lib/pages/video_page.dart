@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../api/api_client.dart';
 
@@ -15,6 +16,7 @@ class _VideoPageState extends State<VideoPage> {
   VideoPlayerController? _videoCtrl;
   bool _loading = true;
   bool _videoLoading = false;
+  bool _isFullscreen = false;
 
   @override
   void initState() {
@@ -25,6 +27,8 @@ class _VideoPageState extends State<VideoPage> {
   @override
   void dispose() {
     _videoCtrl?.dispose();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
     super.dispose();
   }
 
@@ -66,13 +70,70 @@ class _VideoPageState extends State<VideoPage> {
     }
   }
 
+  void _toggleFullscreen() {
+    setState(() => _isFullscreen = !_isFullscreen);
+    if (_isFullscreen) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
+    // 全屏模式
+    if (_isFullscreen && _videoCtrl != null && _videoCtrl!.value.isInitialized) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: GestureDetector(
+          onTap: () {}, // 防止误触退出
+          child: Stack(
+            children: [
+              Center(
+                child: AspectRatio(
+                  aspectRatio: _videoCtrl!.value.aspectRatio,
+                  child: VideoPlayer(_videoCtrl!),
+                ),
+              ),
+              // 退出全屏按钮
+              Positioned(
+                top: 16,
+                right: 16,
+                child: SafeArea(
+                  child: IconButton(
+                    icon: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 32),
+                    onPressed: _toggleFullscreen,
+                  ),
+                ),
+              ),
+              // 播放控制
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _ControlsBar(
+                  controller: _videoCtrl!,
+                  onFullscreen: _toggleFullscreen,
+                  isFullscreen: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 正常模式
     return Column(
       children: [
-        // 视频播放区
+        // 视频区
         if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
           AspectRatio(
             aspectRatio: _videoCtrl!.value.aspectRatio > 0
@@ -82,7 +143,11 @@ class _VideoPageState extends State<VideoPage> {
               alignment: Alignment.bottomCenter,
               children: [
                 VideoPlayer(_videoCtrl!),
-                _ControlsBar(controller: _videoCtrl!),
+                _ControlsBar(
+                  controller: _videoCtrl!,
+                  onFullscreen: _toggleFullscreen,
+                  isFullscreen: false,
+                ),
               ],
             ),
           )
@@ -145,7 +210,13 @@ class _VideoPageState extends State<VideoPage> {
 
 class _ControlsBar extends StatelessWidget {
   final VideoPlayerController controller;
-  const _ControlsBar({required this.controller});
+  final VoidCallback onFullscreen;
+  final bool isFullscreen;
+  const _ControlsBar({
+    required this.controller,
+    required this.onFullscreen,
+    required this.isFullscreen,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -153,14 +224,15 @@ class _ControlsBar extends StatelessWidget {
       valueListenable: controller,
       builder: (context, VideoPlayerValue value, child) {
         return Container(
-          color: Colors.black38,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          color: Colors.black54,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           child: Row(
             children: [
               IconButton(
                 icon: Icon(
                   value.isPlaying ? Icons.pause : Icons.play_arrow,
                   color: Colors.white,
+                  size: isFullscreen ? 36 : 28,
                 ),
                 onPressed: () {
                   value.isPlaying ? controller.pause() : controller.play();
@@ -169,8 +241,19 @@ class _ControlsBar extends StatelessWidget {
               Expanded(
                 child: Text(
                   '${_format(value.position)} / ${_format(value.duration)}',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: isFullscreen ? 14 : 12,
+                  ),
                 ),
+              ),
+              IconButton(
+                icon: Icon(
+                  isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                  color: Colors.white,
+                  size: isFullscreen ? 36 : 28,
+                ),
+                onPressed: onFullscreen,
               ),
             ],
           ),
