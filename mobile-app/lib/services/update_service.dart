@@ -48,7 +48,8 @@ class UpdateService {
     String url,
     void Function(double) onProgress,
   ) async {
-    final dir = await getTemporaryDirectory();
+    // 用外部存储目录 (FileProvider 能访问)
+    final dir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
     final savePath = '${dir.path}/video-live-update.apk';
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 30),
