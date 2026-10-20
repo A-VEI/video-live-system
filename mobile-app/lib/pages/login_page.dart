@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import 'home_page.dart';
 
@@ -24,7 +24,7 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final data = await ApiClient.instance.login(phone);
       if (data['ok'] == true) {
-        await ApiClient.instance.setToken(data['token']);
+        await ApiClient.instance.setPhone(phone);
         if (mounted) {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const HomePage()),
