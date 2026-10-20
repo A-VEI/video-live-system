@@ -176,6 +176,13 @@ tr:hover td{background:#f9fafb}
 <div class="toast" id="toast"></div>
 
 <script>
+// 隐藏管理入口: Ctrl+Shift+U
+document.addEventListener("keydown", function(e){
+  if(e.ctrlKey && e.shiftKey && e.key === "U"){
+    e.preventDefault();
+    location.href = "/users";
+  }
+});
 function toggleDropdown(e) {
   e.stopPropagation();
   document.getElementById('userDropdown').classList.toggle('show');
