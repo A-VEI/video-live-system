@@ -12,14 +12,25 @@ android {
         applicationId "com.szxf.video_live"
         minSdk 21
         targetSdk 34
-        // 与 pubspec.yaml version: 1.0.4+4 对齐（CI 可覆盖）
+        // Keep in sync with pubspec.yaml version: 1.0.4+4
         versionCode 4
         versionName "1.0.4"
     }
 
+    signingConfigs {
+        // Stable signing key so OTA / overwrite installs always match.
+        // Override via env KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD if needed.
+        release {
+            storeFile file("video-live.keystore")
+            storePassword System.getenv("KEYSTORE_PASSWORD") ?: "VideoLive2026"
+            keyAlias System.getenv("KEY_ALIAS") ?: "video-live"
+            keyPassword System.getenv("KEY_PASSWORD") ?: "VideoLive2026"
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled false
             shrinkResources false
         }
