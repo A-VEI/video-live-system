@@ -16,7 +16,6 @@ class _VideoPageState extends State<VideoPage> {
   VideoPlayerController? _videoCtrl;
   bool _loading = true;
   bool _videoLoading = false;
-  bool _isFullscreen = false;
 
   @override
   void initState() {
@@ -27,8 +26,6 @@ class _VideoPageState extends State<VideoPage> {
   @override
   void dispose() {
     _videoCtrl?.dispose();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
     super.dispose();
   }
 
@@ -70,70 +67,23 @@ class _VideoPageState extends State<VideoPage> {
     }
   }
 
-  void _toggleFullscreen() {
-    setState(() => _isFullscreen = !_isFullscreen);
-    if (_isFullscreen) {
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
-    }
+  void _enterFullscreen() {
+    if (_videoCtrl == null) return;
+    // 推送独立全屏页面
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _FullscreenVideoPage(controller: _videoCtrl!),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
-    // 全屏模式
-    if (_isFullscreen && _videoCtrl != null && _videoCtrl!.value.isInitialized) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: GestureDetector(
-          onTap: () {}, // 防止误触退出
-          child: Stack(
-            children: [
-              Center(
-                child: AspectRatio(
-                  aspectRatio: _videoCtrl!.value.aspectRatio,
-                  child: VideoPlayer(_videoCtrl!),
-                ),
-              ),
-              // 退出全屏按钮
-              Positioned(
-                top: 16,
-                right: 16,
-                child: SafeArea(
-                  child: IconButton(
-                    icon: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 32),
-                    onPressed: _toggleFullscreen,
-                  ),
-                ),
-              ),
-              // 播放控制
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: _ControlsBar(
-                  controller: _videoCtrl!,
-                  onFullscreen: _toggleFullscreen,
-                  isFullscreen: true,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // 正常模式
     return Column(
       children: [
-        // 视频区
         if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
           AspectRatio(
             aspectRatio: _videoCtrl!.value.aspectRatio > 0
@@ -145,8 +95,7 @@ class _VideoPageState extends State<VideoPage> {
                 VideoPlayer(_videoCtrl!),
                 _ControlsBar(
                   controller: _videoCtrl!,
-                  onFullscreen: _toggleFullscreen,
-                  isFullscreen: false,
+                  onFullscreen: _enterFullscreen,
                 ),
               ],
             ),
@@ -162,8 +111,6 @@ class _VideoPageState extends State<VideoPage> {
                       style: TextStyle(color: Colors.white54)),
             ),
           ),
-
-        // 频道列表
         Expanded(
           child: ListView.builder(
             itemCount: _streams.length,
@@ -208,21 +155,172 @@ class _VideoPageState extends State<VideoPage> {
   }
 }
 
+// ═══ 独立全屏页面 ═══
+class _FullscreenVideoPage extends StatefulWidget {
+  final VideoPlayerController controller;
+  const _FullscreenVideoPage({required this.controller});
+
+  @override
+  State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
+}
+
+class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
+  bool _showControls = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // 横屏 + 沉浸式
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    // 恢复竖屏 + 状态栏
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
+        overlays: SystemUiOverlay.values);
+    super.dispose();
+  }
+
+  void _exit() {
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTap: () => setState(() => _showControls = !_showControls),
+        child: Stack(
+          children: [
+            // 视频铺满全屏
+            Positioned.fill(
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: SizedBox(
+                  width: widget.controller.value.size.width,
+                  height: widget.controller.value.size.height,
+                  child: VideoPlayer(widget.controller),
+                ),
+              ),
+            ),
+            // 顶部退出按钮
+            if (_showControls)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black54, Colors.transparent],
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white, size: 28),
+                            onPressed: _exit,
+                          ),
+                          const Text('返回',
+                              style: TextStyle(
+                                  color: Colors.white, fontSize: 16)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // 底部控制栏
+            if (_showControls)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Colors.black54, Colors.transparent],
+                    ),
+                  ),
+                  child: ValueListenableBuilder(
+                    valueListenable: widget.controller,
+                    builder: (context, VideoPlayerValue value, _) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                value.isPlaying ? Icons.pause : Icons.play_arrow,
+                                color: Colors.white,
+                                size: 40,
+                              ),
+                              onPressed: () {
+                                value.isPlaying
+                                    ? widget.controller.pause()
+                                    : widget.controller.play();
+                              },
+                            ),
+                            Text(
+                              '${_fmt(value.position)} / ${_fmt(value.duration)}',
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 14),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.fullscreen_exit,
+                                  color: Colors.white, size: 36),
+                              onPressed: _exit,
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+}
+
+// ═══ 控制栏（小窗模式）═══
 class _ControlsBar extends StatelessWidget {
   final VideoPlayerController controller;
   final VoidCallback onFullscreen;
-  final bool isFullscreen;
   const _ControlsBar({
     required this.controller,
     required this.onFullscreen,
-    required this.isFullscreen,
   });
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
       valueListenable: controller,
-      builder: (context, VideoPlayerValue value, child) {
+      builder: (context, VideoPlayerValue value, _) {
         return Container(
           color: Colors.black54,
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -232,7 +330,7 @@ class _ControlsBar extends StatelessWidget {
                 icon: Icon(
                   value.isPlaying ? Icons.pause : Icons.play_arrow,
                   color: Colors.white,
-                  size: isFullscreen ? 36 : 28,
+                  size: 28,
                 ),
                 onPressed: () {
                   value.isPlaying ? controller.pause() : controller.play();
@@ -240,19 +338,13 @@ class _ControlsBar extends StatelessWidget {
               ),
               Expanded(
                 child: Text(
-                  '${_format(value.position)} / ${_format(value.duration)}',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isFullscreen ? 14 : 12,
-                  ),
+                  '${_fmt(value.position)} / ${_fmt(value.duration)}',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
               ),
               IconButton(
-                icon: Icon(
-                  isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                  color: Colors.white,
-                  size: isFullscreen ? 36 : 28,
-                ),
+                icon: const Icon(Icons.fullscreen,
+                    color: Colors.white, size: 28),
                 onPressed: onFullscreen,
               ),
             ],
@@ -262,7 +354,7 @@ class _ControlsBar extends StatelessWidget {
     );
   }
 
-  String _format(Duration d) {
+  String _fmt(Duration d) {
     final m = d.inMinutes.toString().padLeft(2, '0');
     final s = (d.inSeconds % 60).toString().padLeft(2, '0');
     return '$m:$s';
