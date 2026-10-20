@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import 'login_page.dart';
 import 'video_page.dart';
@@ -31,7 +31,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _logout() async {
-    await ApiClient.instance.clearToken();
+    await ApiClient.instance.clearAuth();
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const LoginPage()),
