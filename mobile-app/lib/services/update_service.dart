@@ -1,7 +1,7 @@
 ﻿import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:install_plugin/install_plugin.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
 
@@ -50,7 +50,11 @@ class UpdateService {
   ) async {
     final dir = await getTemporaryDirectory();
     final savePath = '${dir.path}/video-live-update.apk';
-    await Dio().download(
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(minutes: 5),
+    ));
+    await dio.download(
       url,
       savePath,
       onReceiveProgress: (received, total) {
@@ -58,8 +62,8 @@ class UpdateService {
       },
     );
     // 安装 APK
-    final result = await InstallPlugin.install(savePath);
-    debugPrint('install result: $result');
+    final result = await OpenFilex.open(savePath);
+    debugPrint('install result: ${result.type}');
   }
 }
 
