@@ -1,5 +1,5 @@
 name: video_live
-description: 视频直播系统移动端
+description: Video live streaming app
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -12,7 +12,6 @@ dependencies:
   dio: ^5.4.0
   shared_preferences: ^2.2.0
   video_player: ^2.8.0
-  chewie: ^1.8.0
   cupertino_icons: ^1.0.6
 
 dev_dependencies:
