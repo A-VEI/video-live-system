@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'package:chewie/chewie.dart';
 import '../api/api_client.dart';
 
 class VideoPage extends StatefulWidget {
@@ -14,7 +13,6 @@ class _VideoPageState extends State<VideoPage> {
   List<dynamic> _streams = [];
   int? _activeIdx;
   VideoPlayerController? _videoCtrl;
-  ChewieController? _chewieCtrl;
   bool _loading = true;
   bool _videoLoading = false;
 
@@ -26,7 +24,6 @@ class _VideoPageState extends State<VideoPage> {
 
   @override
   void dispose() {
-    _chewieCtrl?.dispose();
     _videoCtrl?.dispose();
     super.dispose();
   }
@@ -46,7 +43,6 @@ class _VideoPageState extends State<VideoPage> {
       _activeIdx = idx;
       _videoLoading = true;
     });
-    _chewieCtrl?.dispose();
     _videoCtrl?.dispose();
 
     final stream = _streams[idx];
@@ -55,18 +51,9 @@ class _VideoPageState extends State<VideoPage> {
     try {
       final vc = VideoPlayerController.networkUrl(Uri.parse(url));
       await vc.initialize();
-      final cc = ChewieController(
-        videoPlayerController: vc,
-        autoPlay: true,
-        looping: true,
-        showControls: true,
-        allowFullScreen: true,
-        allowPlaybackSpeedChanging: false,
-        placeholder: Container(color: Colors.black),
-      );
+      await vc.play();
       setState(() {
         _videoCtrl = vc;
-        _chewieCtrl = cc;
         _videoLoading = false;
       });
     } catch (e) {
@@ -86,10 +73,18 @@ class _VideoPageState extends State<VideoPage> {
     return Column(
       children: [
         // 视频播放区
-        if (_chewieCtrl != null)
+        if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
           AspectRatio(
-            aspectRatio: _videoCtrl!.value.aspectRatio > 0 ? _videoCtrl!.value.aspectRatio : 16 / 9,
-            child: Chewie(controller: _chewieCtrl!),
+            aspectRatio: _videoCtrl!.value.aspectRatio > 0
+                ? _videoCtrl!.value.aspectRatio
+                : 16 / 9,
+            child: Stack(
+              alignment: Alignment.bottomCenter,
+              children: [
+                VideoPlayer(_videoCtrl!),
+                _ControlsBar(controller: _videoCtrl!),
+              ],
+            ),
           )
         else
           Container(
@@ -97,8 +92,9 @@ class _VideoPageState extends State<VideoPage> {
             color: Colors.black,
             child: Center(
               child: _videoLoading
-                ? const CircularProgressIndicator(color: Colors.white)
-                : const Text('选择下方频道开始观看', style: TextStyle(color: Colors.white54)),
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : const Text('选择下方频道开始观看',
+                      style: TextStyle(color: Colors.white54)),
             ),
           ),
 
@@ -112,24 +108,31 @@ class _VideoPageState extends State<VideoPage> {
               return ListTile(
                 leading: CircleAvatar(
                   backgroundColor: isActive
-                    ? Theme.of(context).colorScheme.primary
-                    : Colors.grey[200],
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey[200],
                   child: Text('${i + 1}',
-                    style: TextStyle(
-                      color: isActive ? Colors.white : Colors.grey[600],
-                      fontWeight: FontWeight.bold,
-                    )),
+                      style: TextStyle(
+                        color: isActive ? Colors.white : Colors.grey[600],
+                        fontWeight: FontWeight.bold,
+                      )),
                 ),
-                title: Text(s['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                title: Text(s['name'] ?? '',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(isActive ? '正在播放…' : '点击播放',
-                  style: TextStyle(fontSize: 12,
-                    color: isActive ? Theme.of(context).colorScheme.primary : Colors.grey)),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: isActive
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.grey)),
                 trailing: Icon(
                   isActive ? Icons.graphic_eq : Icons.play_circle_outline,
-                  color: isActive ? Theme.of(context).colorScheme.primary : Colors.grey,
+                  color: isActive
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey,
                 ),
                 selected: isActive,
-                selectedTileColor: Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                selectedTileColor:
+                    Theme.of(context).colorScheme.primary.withOpacity(0.05),
                 onTap: () => _playStream(i),
               );
             },
@@ -137,5 +140,48 @@ class _VideoPageState extends State<VideoPage> {
         ),
       ],
     );
+  }
+}
+
+class _ControlsBar extends StatelessWidget {
+  final VideoPlayerController controller;
+  const _ControlsBar({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable: controller,
+      builder: (context, VideoPlayerValue value, child) {
+        return Container(
+          color: Colors.black38,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(
+                  value.isPlaying ? Icons.pause : Icons.play_arrow,
+                  color: Colors.white,
+                ),
+                onPressed: () {
+                  value.isPlaying ? controller.pause() : controller.play();
+                },
+              ),
+              Expanded(
+                child: Text(
+                  '${_format(value.position)} / ${_format(value.duration)}',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _format(Duration d) {
+    final m = d.inMinutes.toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
 }
