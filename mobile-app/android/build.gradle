@@ -9,17 +9,17 @@ rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
-subprojects {
-    project.evaluationDependsOn(":app")
-}
 
-// Force compileSdk for all subprojects (Flutter plugins)
+// Set compileSdk for all Android subprojects (Flutter plugins)
 subprojects {
-    afterEvaluate { project ->
-        if (project.hasProperty("android")) {
-            project.android {
-                compileSdk 34
-            }
+    pluginManager.withPlugin("com.android.library") {
+        android {
+            compileSdk 34
+        }
+    }
+    pluginManager.withPlugin("com.android.application") {
+        android {
+            compileSdk 34
         }
     }
 }
