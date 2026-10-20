@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频直播系统</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+     background:#f0f2f5;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.box{width:380px;padding:48px 36px;background:#fff;border-radius:16px;text-align:center;
+     box-shadow:0 1px 3px rgba(0,0,0,.08),0 8px 32px rgba(0,0,0,.08)}
+h1{font-size:22px;font-weight:700;color:#111;letter-spacing:-.3px;margin-bottom:32px}
+.form{display:flex;flex-direction:column;gap:14px}
+input{width:100%;padding:14px 16px;border:1.5px solid #e5e7eb;border-radius:12px;
+      font-size:15px;outline:none;transition:all .2s;text-align:center;letter-spacing:4px}
+input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+input::placeholder{color:#9ca3af;letter-spacing:1px}
+button{width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;
+       font-weight:600;cursor:pointer;background:#2563eb;color:#fff;transition:all .15s}
+button:hover{background:#1d4ed8;transform:translateY(-1px)}
+button:active{transform:translateY(0)}
+button:disabled{background:#93c5fd;cursor:not-allowed;transform:none}
+.err{color:#dc2626;font-size:13px;background:#fef2f2;padding:10px;border-radius:8px;display:none}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>视频直播系统</h1>
+  <div class="form">
+    <input type="password" id="code" placeholder="请输入口令" autofocus
+           onkeydown="if(event.key==='Enter')doDownload()">
+    <button id="btn" onclick="doDownload()">下载 App</button>
+    <div class="err" id="err">口令错误</div>
+  </div>
+</div>
+<script>
+function doDownload(){
+  var v = document.getElementById('code').value.trim();
+  if(!v) return;
+  document.getElementById('btn').disabled = true;
+  document.getElementById('err').style.display = 'none';
+  // 先验证口令
+  fetch('/download/apk?code=' + encodeURIComponent(v))
+    .then(function(r){
+      if(r.ok){
+        // 触发下载
+        var a = document.createElement('a');
+        a.href = '/download/apk?code=' + encodeURIComponent(v);
+        a.download = 'video-live.apk';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } else {
+        document.getElementById('err').style.display = 'block';
+      }
+    })
+    .catch(function(){ document.getElementById('err').style.display = 'block'; })
+    .finally(function(){ document.getElementById('btn').disabled = false; });
+}
+// Ctrl+Shift+U 进入管理 (隐藏入口)
+document.addEventListener('keydown', function(e){
+  if(e.ctrlKey && e.shiftKey && e.key === 'U'){
+    e.preventDefault();
+    location.href = '/users';
+  }
+});
+</script>
+</body>
+</html>
