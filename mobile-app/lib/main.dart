@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'api/api_client.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
@@ -6,7 +6,7 @@ import 'pages/home_page.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 默认服务器地址, 发布时改成实际地址
-  await ApiClient.init(baseUrl: 'http://10.0.2.2:5000');
+  await ApiClient.init(baseUrl: 'http://112.25.181.94:8119');
   runApp(const VideoApp());
 }
 
