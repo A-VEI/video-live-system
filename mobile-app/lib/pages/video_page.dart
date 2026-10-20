@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../api/api_client.dart';
@@ -50,8 +50,14 @@ class _VideoPageState extends State<VideoPage> {
     final url = ApiClient.instance.proxyUrl(stream['url']);
 
     try {
-      final vc = VideoPlayerController.networkUrl(Uri.parse(url));
+      final vc = VideoPlayerController.networkUrl(Uri.parse(url),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+      );
       await vc.initialize();
+      // 跳到直播边沿 (最新画面)
+      if (vc.value.duration > const Duration(seconds: 5)) {
+        await vc.seekTo(vc.value.duration - const Duration(seconds: 3));
+      }
       await vc.play();
       setState(() {
         _videoCtrl = vc;
