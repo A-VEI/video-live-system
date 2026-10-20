@@ -1,7 +1,7 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:install_plugin/install_plugin.dart';
 import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
 
@@ -57,7 +57,9 @@ class UpdateService {
         if (total > 0) onProgress(received / total);
       },
     );
-    await OpenFilex.open(savePath);
+    // 安装 APK
+    final result = await InstallPlugin.install(savePath);
+    debugPrint('install result: $result');
   }
 }
 
