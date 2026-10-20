@@ -205,7 +205,7 @@ def admin_required(f):
         if 'phone' not in session:
             return redirect(url_for('login'))
         if session.get('role') != 'admin':
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('video_page'))
         return f(*args, **kwargs)
     return decorated
 
@@ -313,7 +313,7 @@ def login():
         db.execute('INSERT INTO login_log (phone,ip) VALUES (?,?)',
                    (phone, request.remote_addr))
         db.commit()
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('video_page'))
     return render_template('login.html', error=None)
 
 
@@ -344,8 +344,8 @@ def devices_page():
 
 # ── HLS 代理 (白名单防 SSRF) ─────────────────────────────────
 @app.route('/proxy/<path:stream_path>')
-@login_required
 def proxy_stream(stream_path):
+    # 免认证: SSRF 白名单保护, 视频播放器无法带自定义头
     """
     代理内网 HLS 流。安全限制:
     - 必须登录
@@ -532,6 +532,33 @@ def api_delete_user(uid):
 
 
 
+
+# ── 自动更新 ──
+import json as _json
+
+APP_VERSION = '1.0.0'  # 当前最新版本号
+
+@app.route('/api/app/version')
+def app_version():
+    """返回最新版本信息"""
+    apk_path = os.path.join(app.root_path, 'static', 'app', 'video-live.apk')
+    size = os.path.getsize(apk_path) if os.path.exists(apk_path) else 0
+    return jsonify(
+        version=APP_VERSION,
+        update_url='/api/app/download',
+        size=size,
+        notes='优化体验'
+    )
+
+
+@app.route('/api/app/download')
+def app_download():
+    """下载最新 APK (免认证, 供 App 自动更新)"""
+    apk_path = os.path.join(app.root_path, 'static', 'app', 'video-live.apk')
+    if not os.path.exists(apk_path):
+        return 'APK not found', 404
+    return send_file(apk_path, as_attachment=True, download_name='video-live.apk')
+
 # ════════════════════════════════════════════════════════════
 #  Mobile API (JWT 认证, App 专用)
 # ════════════════════════════════════════════════════════════
@@ -707,4 +734,4 @@ def mobile_delete_user(uid):
 # ── 启动 ──────────────────────────────────────────────────────
 if __name__ == '__main__':
     init_db()
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=8119, debug=False, threaded=True)
