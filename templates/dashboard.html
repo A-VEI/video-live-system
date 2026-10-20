@@ -1,0 +1,266 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频直播系统</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+     background:#f0f2f5;color:#111;min-height:100vh;overflow:hidden}
+
+/* ── 顶栏 ── */
+.topbar{height:56px;background:#fff;border-bottom:1px solid #e5e7eb;
+        display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+        box-shadow:0 1px 2px rgba(0,0,0,.04);position:relative;z-index:10}
+.brand{display:flex;align-items:center;gap:12px}
+
+.brand-name{font-size:16px;font-weight:700;color:#111;letter-spacing:-.3px}
+
+
+/* ── 个人中心 ── */
+.topbar-right{display:flex;align-items:center;gap:20px}
+.user-menu{position:relative;cursor:pointer}
+.user-chip{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 5px;
+           border:1.5px solid #e5e7eb;border-radius:24px;transition:all .15s;background:#fff}
+.user-chip:hover{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+.user-avatar{width:28px;height:28px;background:linear-gradient(135deg,#2563eb,#3b82f6);
+             border-radius:50%;display:flex;align-items:center;justify-content:center;
+             font-size:12px;color:#fff;font-weight:700}
+.user-name{font-size:13px;font-weight:600;color:#374151}
+.user-dropdown{position:absolute;right:0;top:calc(100% + 8px);width:180px;
+               background:#fff;border:1px solid #e5e7eb;border-radius:12px;
+               padding:6px;display:none;z-index:100;
+               box-shadow:0 4px 24px rgba(0,0,0,.1);animation:fadeIn .15s}
+.user-dropdown.show{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.dropdown-item{display:flex;align-items:center;gap:10px;padding:10px 12px;
+               border-radius:8px;font-size:13px;color:#374151;cursor:pointer;
+               transition:all .1s;text-decoration:none;font-weight:500}
+.dropdown-item:hover{background:#f3f4f6;color:#111}
+.dropdown-item.danger:hover{background:#fef2f2;color:#dc2626}
+.dropdown-divider{height:1px;background:#e5e7eb;margin:4px 8px}
+
+/* ── 主布局 ── */
+.layout{display:flex;height:calc(100vh - 56px)}
+
+/* ── 左侧频道 ── */
+.sidebar{width:280px;background:#fff;border-right:1px solid #e5e7eb;
+         display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-head{padding:20px 20px 12px;font-size:11px;color:#9ca3af;
+              text-transform:uppercase;letter-spacing:1.2px;font-weight:700}
+.chan-list{flex:1;overflow-y:auto;padding:0 12px 12px}
+.chan-list::-webkit-scrollbar{width:5px}
+.chan-list::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
+
+.chan{display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:6px;
+      border-radius:12px;cursor:pointer;transition:all .12s;border:1.5px solid transparent}
+.chan:hover{background:#f9fafb;border-color:#e5e7eb}
+.chan.active{background:#eff6ff;border-color:#2563eb}
+
+.chan-info{flex:1;min-width:0}
+.chan-name{font-size:14px;font-weight:600;color:#111;white-space:nowrap;
+           overflow:hidden;text-overflow:ellipsis}
+.chan-meta{font-size:11px;color:#9ca3af;margin-top:2px}
+.chan.active .chan-meta{color:#2563eb}
+.chan-dot{width:8px;height:8px;border-radius:50%;background:#d1d5db;flex-shrink:0}
+.chan.active .chan-dot{background:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+
+/* ── 右侧播放 ── */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.player-wrap{flex:1;position:relative;background:#111;min-height:0;border-radius:0}
+.player-wrap video{width:100%;height:100%;object-fit:contain;display:none}
+.player-wrap video.show{display:block}
+
+.empty-state{position:absolute;inset:0;display:flex;flex-direction:column;
+             align-items:center;justify-content:center;gap:12px}
+.empty-icon{width:72px;height:72px;background:rgba(255,255,255,.08);border-radius:20px;
+            display:flex;align-items:center;justify-content:center;font-size:28px}
+.empty-text{font-size:15px;color:rgba(255,255,255,.5);font-weight:500}
+.empty-hint{font-size:12px;color:rgba(255,255,255,.3)}
+
+.loading{position:absolute;inset:0;background:rgba(17,17,17,.9);
+         display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,.15);
+         border-top-color:#2563eb;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.load-text{font-size:13px;color:rgba(255,255,255,.6)}
+
+.error-state{position:absolute;inset:0;background:rgba(17,17,17,.9);
+             display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.error-icon{font-size:32px}
+.error-text{font-size:15px;color:rgba(255,255,255,.7);font-weight:500}
+.error-detail{font-size:11px;color:rgba(255,255,255,.35);font-family:monospace}
+
+/* ── 底栏 ── */
+.infobar{height:44px;background:#fff;border-top:1px solid #e5e7eb;
+         display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+.infobar-left{display:flex;align-items:center;gap:12px}
+.live-badge{display:none;align-items:center;gap:5px;padding:3px 10px;
+            background:#dc2626;border-radius:6px;font-size:11px;font-weight:700;
+            letter-spacing:.5px;color:#fff}
+.live-badge.show{display:flex}
+.live-badge::before{content:'';width:5px;height:5px;background:#fff;border-radius:50%;
+                    animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.stream-name{font-size:13px;font-weight:600;color:#111}
+.infobar-right{font-size:12px;color:#9ca3af;font-family:'SF Mono','Consolas',monospace}
+
+@media(max-width:768px){
+  .layout{flex-direction:column}
+  .sidebar{width:100%;height:auto;max-height:200px;border-right:none;border-bottom:1px solid #e5e7eb}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-name">视频直播系统</div>
+  </div>
+  <div class="topbar-right">
+    <div class="user-menu" onclick="toggleDropdown(event)">
+      <div class="user-chip">
+        <div class="user-avatar">{{ (name or 'U')[0] }}</div>
+        <span class="user-name">{{ name or '用户' }}</span>
+      </div>
+      <div class="user-dropdown" id="userDropdown">
+        {% if role == 'admin' %}
+        <a class="dropdown-item" href="/devices">设备管理</a>
+        <a class="dropdown-item" href="/users">用户管理</a>
+        <div class="dropdown-divider"></div>
+        {% endif %}
+        <a class="dropdown-item danger" href="/logout">退出登录</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-head">直播频道</div>
+    <div class="chan-list">
+      {% for s in streams %}
+      <div class="chan" data-id="{{ s['id'] }}" data-name="{{ s['name'] }}"
+           data-url="{{ s['url'] }}" onclick="playStream(this)">
+        <div class="chan-info">
+          <div class="chan-name">{{ s['name'] }}</div>
+          <div class="chan-meta">点击播放</div>
+        </div>
+        <div class="chan-dot"></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="player-wrap" id="playerWrap">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">&#127909;</div>
+        <div class="empty-text">选择频道开始观看</div>
+        <div class="empty-hint">从左侧列表点击任意直播频道</div>
+      </div>
+      <video id="player" muted autoplay playsinline controls></video>
+      <div class="loading" id="loading" style="display:none">
+        <div class="spinner"></div>
+        <div class="load-text" id="loadText">正在连接…</div>
+      </div>
+      <div class="error-state" id="errorState" style="display:none">
+        <div class="error-icon">&#9888;</div>
+        <div class="error-text">视频加载失败</div>
+        <div class="error-detail" id="errorDetail"></div>
+      </div>
+    </div>
+    <div class="infobar">
+      <div class="infobar-left">
+        <div class="live-badge" id="livePill">LIVE</div>
+        <div class="stream-name" id="streamName"></div>
+      </div>
+      <div class="infobar-right" id="streamUrl"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/hls.min.js"></script>
+<script>
+var hls = null, currentEl = null;
+
+function toggleDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('userDropdown').classList.toggle('show');
+}
+document.addEventListener('click', function() {
+  var dd = document.getElementById('userDropdown');
+  if (dd) dd.classList.remove('show');
+});
+
+function playStream(el) {
+  document.querySelectorAll('.chan').forEach(function(c) {
+    c.classList.remove('active');
+    c.querySelector('.chan-meta').textContent = '点击播放';
+  });
+  el.classList.add('active');
+  el.querySelector('.chan-meta').textContent = '正在播放…';
+  currentEl = el;
+
+  var url = el.getAttribute('data-url');
+  var name = el.getAttribute('data-name');
+  var video = document.getElementById('player');
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('errorState').style.display = 'none';
+  document.getElementById('loading').style.display = '';
+  video.classList.remove('show');
+  document.getElementById('loadText').textContent = '正在连接 ' + name + '…';
+  document.getElementById('streamName').textContent = name;
+  document.getElementById('streamUrl').textContent = url;
+  document.getElementById('livePill').classList.add('show');
+
+  if (hls) { hls.destroy(); hls = null; }
+  var proxyUrl = url.replace(/^http:\/\//, '/proxy/');
+
+  if (Hls.isSupported()) {
+    hls = new Hls({
+      maxBufferLength: 10, maxMaxBufferLength: 30,
+      lowLatencyMode: false,
+      manifestLoadingTimeOut: 15000, manifestLoadingMaxRetry: 3,
+      levelLoadingTimeOut: 15000, fragLoadingTimeOut: 20000,
+      enableWorker: true,
+    });
+    hls.loadSource(proxyUrl);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      video.classList.add('show');
+      document.getElementById('loading').style.display = 'none';
+      video.play().catch(function(){});
+    });
+
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      if (!data.fatal) return;
+      switch (data.type) {
+        case Hls.ErrorTypes.NETWORK_ERROR:
+          setTimeout(function(){ if (hls) hls.startLoad(); }, 2000);
+          break;
+        case Hls.ErrorTypes.MEDIA_ERROR:
+          hls.recoverMediaError();
+          break;
+        default:
+          document.getElementById('loading').style.display = 'none';
+          document.getElementById('errorState').style.display = '';
+          document.getElementById('errorDetail').textContent = data.details || '';
+          el.querySelector('.chan-meta').textContent = '连接失败';
+          if (hls) { hls.destroy(); hls = null; }
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = proxyUrl;
+    video.classList.add('show');
+    video.addEventListener('loadeddata', function() {
+      document.getElementById('loading').style.display = 'none';
+    }, {once: true});
+  }
+}
+</script>
+</body>
+</html>
