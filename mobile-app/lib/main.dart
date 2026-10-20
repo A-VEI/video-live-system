@@ -49,14 +49,19 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _checkAuth() async {
     final api = ApiClient.instance;
     if (api.token != null) {
+      // 有 token 就直接进, 网络问题也不清 token
       try {
         final me = await api.me();
         if (me['ok'] == true) {
           setState(() { _loggedIn = true; _loading = false; });
           return;
         }
-      } catch (_) {}
-      await api.clearToken();
+        // 只有明确 401 才清 token
+      } catch (_) {
+        // 网络错误, 保留 token 仍然进入
+      }
+      setState(() { _loggedIn = true; _loading = false; });
+      return;
     }
     setState(() { _loading = false; });
   }
