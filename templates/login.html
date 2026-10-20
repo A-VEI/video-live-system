@@ -1,0 +1,41 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频直播系统 - 登录</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+     background:#f0f2f5;min-height:100vh;display:flex;align-items:center;justify-content:center}
+
+.login{width:400px;padding:48px 40px;background:#fff;border-radius:16px;text-align:center;
+       box-shadow:0 1px 3px rgba(0,0,0,.08),0 8px 32px rgba(0,0,0,.08)}
+
+h1{font-size:24px;font-weight:700;color:#111;letter-spacing:-.5px;margin-bottom:8px}
+.sub{font-size:14px;color:#666;margin-bottom:32px}
+.form{margin-top:8px}
+input{width:100%;padding:14px 16px;border:1.5px solid #e5e7eb;border-radius:12px;
+      font-size:15px;outline:none;transition:all .2s;background:#fafafa}
+input:focus{border-color:#2563eb;background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+input::placeholder{color:#9ca3af}
+.btn{width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;
+     font-weight:600;cursor:pointer;transition:all .15s;margin-top:16px;
+     background:#2563eb;color:#fff;letter-spacing:.3px}
+.btn:hover{background:#1d4ed8;transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,.3)}
+.btn:active{transform:translateY(0)}
+.err{color:#dc2626;font-size:13px;margin-top:14px;background:#fef2f2;padding:10px;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="login">
+  <h1>视频直播系统</h1>
+  <div class="sub">请登录后查看直播画面</div>
+  <form method="post" class="form">
+    <input type="tel" name="phone" placeholder="手机号" maxlength="11" autofocus>
+    <button type="submit" class="btn">登录</button>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  </form>
+</div>
+</body>
+</html>
