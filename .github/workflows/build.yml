@@ -28,7 +28,7 @@ jobs:
       - name: Verify Android project
         run: |
           test -f android/app/src/main/AndroidManifest.xml
-          test -f android/app/src/main/kotlin/com/szxf/video_live/MainActivity.kt
+          test -f android/app/src/main/kotlin/com/video/live/MainActivity.kt
           test -f android/app/src/main/res/xml/file_paths.xml
           grep -q 'usesCleartextTraffic' android/app/src/main/AndroidManifest.xml
 

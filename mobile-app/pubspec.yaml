@@ -13,7 +13,6 @@ dependencies:
     sdk: flutter
   dio: ^5.4.0
   shared_preferences: ^2.2.0
-  video_player: ^2.8.0
   cupertino_icons: ^1.0.6
   open_filex: ^4.5.0
   path_provider: ^2.1.0
@@ -28,3 +27,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/live.png

@@ -161,15 +161,14 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.asset(
+                    'assets/live.png',
+                    width: 72,
+                    height: 72,
+                    fit: BoxFit.cover,
                   ),
-                  child: const Icon(Icons.play_circle_outline,
-                      color: Colors.white, size: 40),
                 ),
                 const SizedBox(height: 20),
                 const Text(

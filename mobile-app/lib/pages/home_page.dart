@@ -258,6 +258,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  String _buildLabel() {
+    if (kBuildTime > 0) {
+      final d = DateTime.fromMillisecondsSinceEpoch(kBuildTime * 1000);
+      String p2(int n) => n.toString().padLeft(2, '0');
+      return '${d.year}-${p2(d.month)}-${p2(d.day)} ${p2(d.hour)}:${p2(d.minute)}';
+    }
+    return kBuildId > 0 ? '#$kBuildId' : '—';
+  }
+
   /// 右侧抽屉：设置
   Widget _buildSettingsDrawer() {
     return Drawer(
@@ -298,49 +307,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _quickSwitchIsp();
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.speed),
-              title: const Text('播放引擎'),
-              subtitle: Text(
-                '当前: ${kEngineLabels[ApiClient.instance.playEngine]}',
-              ),
-              onTap: () async {
-                Navigator.pop(context);
-                final e = await showModalBottomSheet<PlayEngine>(
-                  context: context,
-                  builder: (c) => SafeArea(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const ListTile(
-                          title: Text('播放引擎'),
-                          subtitle: Text('流畅=与网页相同缓冲策略；原生=系统播放器'),
-                        ),
-                        for (final e in PlayEngine.values)
-                          RadioListTile<PlayEngine>(
-                            title: Text(kEngineLabels[e]!),
-                            value: e,
-                            groupValue: ApiClient.instance.playEngine,
-                            onChanged: (v) => Navigator.pop(c, v),
-                          ),
-                        const SizedBox(height: 8),
-                      ],
-                    ),
-                  ),
-                );
-                if (e != null) {
-                  await ApiClient.instance.setPlayEngine(e);
-                  if (mounted) setState(() {});
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                          content: Text(
-                              '播放引擎已切换为 ${kEngineLabels[e]}，重进频道生效')),
-                    );
-                  }
-                }
-              },
-            ),
             if (_role == 'admin')
               SwitchListTile(
                 secondary: _webVideoSaving
@@ -360,8 +326,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('构建信息'),
-              subtitle: Text(
-                  'build $kBuildId / t$kBuildTime · ${ApiClient.instance.playEngine == PlayEngine.hlsjs ? "流畅" : "原生"}'),
+              subtitle: Text(_buildLabel()),
             ),
             ListTile(
               leading: const Icon(Icons.system_update_alt),

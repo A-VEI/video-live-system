@@ -30,11 +30,6 @@ class ApiClient {
     _instance._token = prefs.getString('auth_token');
     _instance._name = prefs.getString('auth_name');
     _instance._role = prefs.getString('auth_role') ?? 'user';
-    final eng = prefs.getString('play_engine');
-    _instance._engine = PlayEngine.values.firstWhere(
-      (e) => e.name == eng,
-      orElse: () => PlayEngine.hlsjs,
-    );
     _instance._setupDio();
     return _instance;
   }
@@ -296,30 +291,6 @@ class ApiClient {
         data: {'old_password': oldPassword, 'new_password': newPassword});
   }
 
-
-  // ── 播放引擎（流畅=Web/hls.js，原生=ExoPlayer）──
-  PlayEngine get playEngine {
-    // default smooth
-    return _engine ?? PlayEngine.hlsjs;
-  }
-
-  PlayEngine? _engine;
-
-  Future<void> setPlayEngine(PlayEngine e) async {
-    _engine = e;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('play_engine', e.name);
-  }
-
-  Future<PlayEngine> loadPlayEngine() async {
-    final prefs = await SharedPreferences.getInstance();
-    final n = prefs.getString('play_engine');
-    _engine = PlayEngine.values.firstWhere(
-      (e) => e.name == n,
-      orElse: () => PlayEngine.hlsjs,
-    );
-    return _engine!;
-  }
 
   // ── 网页观看开关 ──
   Future<bool> getWebVideoEnabled() async {

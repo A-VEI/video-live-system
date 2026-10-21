@@ -45,10 +45,4 @@ ServerEndpoint? matchEndpoint(String baseUrl) {
   return null;
 }
 
-/// 播放引擎
-enum PlayEngine { hlsjs, native }
 
-const kEngineLabels = {
-  PlayEngine.hlsjs: '流畅',
-  PlayEngine.native: '原生',
-};

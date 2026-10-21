@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:video_player/video_player.dart';
 import '../api/api_client.dart';
-import '../config.dart';
 import 'hls_webview_player.dart';
 
+/// 视频页：仅流畅引擎（WebView + hls.js）
 class VideoPage extends StatefulWidget {
   const VideoPage({super.key});
 
@@ -16,15 +15,11 @@ class VideoPage extends StatefulWidget {
 class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   List<dynamic> _streams = [];
   int? _activeIdx;
-  int _playGen = 0; // 播放代数，快速连点防串台
-  VideoPlayerController? _videoCtrl;
   bool _loading = true;
   bool _videoLoading = false;
   String? _error;
-  bool _isLive = true;
-  bool _useWebEngine = true;
-  bool _failoverTried = false;
   String? _webProxyUrl;
+  int _playGen = 0;
 
   @override
   void initState() {
@@ -36,13 +31,11 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _videoCtrl?.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 切回前台：强制重建，避免白屏
     if (state == AppLifecycleState.resumed && mounted) {
       setState(() {});
     }
@@ -69,182 +62,86 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _playStreamNative(int idx) async {
+  void _playStream(int idx) {
     final gen = ++_playGen;
-    setState(() {
-      _useWebEngine = false;
-      _videoLoading = true;
-      _error = null;
-      _webProxyUrl = null;
-    });
-    final stream = _streams[idx] as Map;
-    final rawProxy = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
-    final url = ApiClient.instance.absoluteUrl(rawProxy);
-    try {
-      final vc = VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        formatHint: VideoFormat.hls,
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
-      );
-      await vc.initialize();
-      if (!mounted || gen != _playGen) {
-        vc.dispose();
-        return;
-      }
-      await vc.play();
-      if (!mounted || gen != _playGen) {
-        vc.dispose();
-        return;
-      }
-      setState(() {
-        _videoCtrl = vc;
-        _videoLoading = false;
-        _isLive = true;
-      });
-    } catch (e) {
-      if (!mounted || gen != _playGen) return;
-      setState(() {
-        _videoLoading = false;
-        _videoCtrl = null;
-        _error = describePlayError(e);
-      });
-    }
-  }
-
-  Future<void> _playStream(int idx) async {
-    final gen = ++_playGen;
-    if (_activeIdx == idx &&
-        (_videoCtrl?.value.isPlaying == true || _webProxyUrl != null)) {
-      return;
-    }
+    if (_activeIdx == idx && _webProxyUrl != null) return;
     setState(() {
       _activeIdx = idx;
       _videoLoading = true;
       _error = null;
       _webProxyUrl = null;
     });
-    _useWebEngine = ApiClient.instance.playEngine == PlayEngine.hlsjs;
-    if (_useWebEngine) {
-      final stream = _streams[idx] as Map;
-      final raw = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
-      if (!mounted || gen != _playGen) return;
-      setState(() {
-        _webProxyUrl = ApiClient.instance.absoluteUrl(raw);
-        _videoLoading = false;
-        _isLive = true;
-      });
-      return;
-    }
-    await _playStreamNative(idx);
-  }
-
-  Future<void> _retryCurrent() async {
-    _failoverTried = false;
-    final idx = _activeIdx;
-    if (idx == null) return;
-    // 先刷新签名 URL 再重试
-    try {
-      final data = await ApiClient.instance.getStreams();
-      if (!mounted) return;
-      setState(() => _streams = data);
-    } catch (_) {}
-    await _playStream(idx);
+    final stream = _streams[idx] as Map;
+    final raw = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
+    final url = ApiClient.instance.absoluteUrl(raw);
+    if (!mounted || gen != _playGen) return;
+    setState(() {
+      _webProxyUrl = url;
+      _videoLoading = false;
+    });
   }
 
   void _enterFullscreen() {
-    if (_useWebEngine && _webProxyUrl != null) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => _FullscreenWebViewPage(
-            proxyUrl: _webProxyUrl!,
-            title: _streams[_activeIdx ?? 0]['name']?.toString() ?? '',
-          ),
-        ),
-      );
-      return;
-    }
-    final ctrl = _videoCtrl;
-    if (ctrl == null) return;
+    if (_webProxyUrl == null) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => _FullscreenVideoPage(
-          controller: ctrl,
-          title: _streams[_activeIdx!]['name']?.toString() ?? '',
-          isLive: _isLive,
+        builder: (_) => _FullscreenWebViewPage(
+          proxyUrl: _webProxyUrl!,
+          title: (_streams[_activeIdx ?? 0] as Map)['name']?.toString() ?? '',
         ),
       ),
     );
   }
 
-  @override
-  Widget _videoPlayerBox({double? fixedHeight}) {
-    final video = _useWebEngine && _webProxyUrl != null
-        ? HlsWebViewPlayer(
-            proxyUrl: _webProxyUrl!,
-            onFallbackNative: () {
+  Widget _playerBox() {
+    if (_webProxyUrl == null) {
+      return Center(
+        child: _videoLoading
+            ? const CircularProgressIndicator(color: Colors.white)
+            : Text(
+                _error ?? '选择频道开始观看',
+                style: TextStyle(
+                  color: _error != null ? Colors.orange[200] : Colors.white54,
+                ),
+              ),
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        HlsWebViewPlayer(
+          key: ValueKey('web-$_webProxyUrl'),
+          proxyUrl: _webProxyUrl!,
+          onFallbackNative: () {
+            // 仅保留流畅引擎：失败时重试当前频道
+            if (!mounted) return;
+            final idx = _activeIdx;
+            final url = _webProxyUrl;
+            setState(() {
+              _webProxyUrl = null;
+              _videoLoading = true;
+            });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
               setState(() {
-                _useWebEngine = false;
-                _videoLoading = true;
-                _webProxyUrl = null;
+                _webProxyUrl = url;
+                _videoLoading = false;
               });
-              final idx = _activeIdx;
-              if (idx != null) _playStreamNative(idx);
-            },
-          )
-        : (_videoCtrl != null && _videoCtrl!.value.isInitialized)
-            ? Stack(
-                alignment: Alignment.bottomCenter,
-                children: [
-                  VideoPlayer(_videoCtrl!),
-                  _ControlsBar(
-                    controller: _videoCtrl!,
-                    isLive: _isLive,
-                    onFullscreen: _enterFullscreen,
-                  ),
-                ],
-              )
-            : Center(
-                child: _videoLoading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _error ?? '选择频道开始观看',
-                            style: TextStyle(
-                              color: _error != null
-                                  ? Colors.orange[200]
-                                  : Colors.white54,
-                              fontSize: 14,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          if (_error != null) ...[
-                            const SizedBox(height: 12),
-                            TextButton(
-                              onPressed: _retryCurrent,
-                              child: const Text('重试'),
-                            ),
-                          ],
-                        ],
-                      ),
-              );
-
-    final box = Container(
-      color: Colors.black,
-      width: double.infinity,
-      height: fixedHeight,
-      child: video,
-    );
-
-    if (fixedHeight != null) return box;
-    // 比例盒（竖屏顶部 / 横屏左侧由调用方控制高度）
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: box,
+            });
+            if (idx != null) _playStream(idx);
+          },
+        ),
+        Positioned(
+          right: 8,
+          bottom: 8,
+          child: IconButton(
+            color: Colors.white,
+            icon: const Icon(Icons.fullscreen),
+            onPressed: _enterFullscreen,
+          ),
+        ),
+      ],
     );
   }
 
@@ -307,170 +204,24 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
       builder: (context, constraints) {
         final isLandscape = constraints.maxWidth > constraints.maxHeight;
         if (isLandscape) {
-          // 横屏：左右结构，视频 | 频道列表
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
                 flex: 3,
-                child: ColoredBox(
-                  color: Colors.black,
-                  child: _useWebEngine && _webProxyUrl != null
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            HlsWebViewPlayer(
-                          key: ValueKey('web-$_webProxyUrl'),
-                          proxyUrl: _webProxyUrl!,
-                          onFallbackNative: () {
-                            if (!mounted) return;
-                            setState(() {
-                              _useWebEngine = false;
-                              _videoLoading = true;
-                              _webProxyUrl = null;
-                            });
-                            final idx = _activeIdx;
-                            if (idx != null) _playStreamNative(idx);
-                          },
-                            ),
-                            Positioned(
-                              right: 8,
-                              bottom: 8,
-                              child: IconButton(
-                                color: Colors.white,
-                                icon: const Icon(Icons.fullscreen),
-                                onPressed: _enterFullscreen,
-                              ),
-                            ),
-                          ],
-                        )
-                      : (_videoCtrl != null && _videoCtrl!.value.isInitialized)
-                          ? Stack(
-                              alignment: Alignment.bottomCenter,
-                              children: [
-                                VideoPlayer(_videoCtrl!),
-                                _ControlsBar(
-                                  controller: _videoCtrl!,
-                                  isLive: _isLive,
-                                  onFullscreen: _enterFullscreen,
-                                ),
-                              ],
-                            )
-                          : Center(
-                              child: _videoLoading
-                                  ? const CircularProgressIndicator(
-                                      color: Colors.white)
-                                  : Text(
-                                      _error ?? '选择右侧频道开始观看',
-                                      style: TextStyle(
-                                        color: _error != null
-                                            ? Colors.orange[200]
-                                            : Colors.white54,
-                                      ),
-                                    ),
-                            ),
-                ),
+                child: ColoredBox(color: Colors.black, child: _playerBox()),
               ),
               const VerticalDivider(width: 1),
-              Expanded(
-                flex: 2,
-                child: _channelList(),
-              ),
+              Expanded(flex: 2, child: _channelList()),
             ],
           );
         }
-        // 竖屏：保持原样（视频在上，列表在下）
         return Column(
           children: [
-            if (_useWebEngine && _webProxyUrl != null)
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: ColoredBox(
-                  color: Colors.black,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      HlsWebViewPlayer(
-                        key: ValueKey('webp-$_webProxyUrl'),
-                        proxyUrl: _webProxyUrl!,
-                        onFallbackNative: () {
-                          if (!mounted) return;
-                          setState(() {
-                            _useWebEngine = false;
-                            _videoLoading = true;
-                            _webProxyUrl = null;
-                          });
-                          final idx = _activeIdx;
-                          if (idx != null) _playStreamNative(idx);
-                        },
-                      ),
-                      Positioned(
-                        right: 8,
-                        bottom: 8,
-                        child: IconButton(
-                          color: Colors.white,
-                          icon: const Icon(Icons.fullscreen),
-                          onPressed: _enterFullscreen,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
-              AspectRatio(
-                aspectRatio: _videoCtrl!.value.aspectRatio > 0
-                    ? _videoCtrl!.value.aspectRatio
-                    : 16 / 9,
-                child: Stack(
-                  alignment: Alignment.bottomCenter,
-                  children: [
-                    VideoPlayer(_videoCtrl!),
-                    _ControlsBar(
-                      controller: _videoCtrl!,
-                      isLive: _isLive,
-                      onFullscreen: _enterFullscreen,
-                    ),
-                  ],
-                ),
-              )
-            else
-              Container(
-                height: 220,
-                color: Colors.black,
-                child: Center(
-                  child: _videoLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _error ?? '选择下方频道开始观看',
-                              style: TextStyle(
-                                color: _error != null
-                                    ? Colors.orange[200]
-                                    : Colors.white54,
-                                fontSize: 14,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                            if (_error != null) ...[
-                              const SizedBox(height: 12),
-                              TextButton(
-                                onPressed: _retryCurrent,
-                                child: const Text('重试'),
-                              ),
-                            ],
-                          ],
-                        ),
-                ),
-              ),
-            if (_error != null && _videoCtrl == null && _webProxyUrl == null)
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(_error!,
-                    style: TextStyle(color: Colors.red[400], fontSize: 12)),
-              ),
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: ColoredBox(color: Colors.black, child: _playerBox()),
+            ),
             Expanded(child: _channelList()),
           ],
         );
@@ -479,8 +230,7 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   }
 }
 
-
-/// 流畅引擎全屏：横屏 + 沉浸式 + WebView 播放
+/// 流畅引擎全屏
 class _FullscreenWebViewPage extends StatefulWidget {
   final String proxyUrl;
   final String title;
@@ -508,7 +258,12 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
   @override
   void dispose() {
     _hideTimer?.cancel();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
         overlays: SystemUiOverlay.values);
     super.dispose();
@@ -526,30 +281,19 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
     if (_showControls) _armHide();
   }
 
-  void _keepVisible() {
-    setState(() => _showControls = true);
-    _armHide();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, _) {
-        _hideTimer?.cancel();
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        resizeToAvoidBottomInset: false,
-        body: SizedBox.expand(
-          child: Stack(
+    return Scaffold(
+      backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: false,
+      body: SizedBox.expand(
+        child: Stack(
           fit: StackFit.expand,
           children: [
             HlsWebViewPlayer(
               key: ValueKey('fs-${widget.proxyUrl}'),
               proxyUrl: widget.proxyUrl,
             ),
-            // 盖在 WebView 上的点按层：视频只需播放，无需点到网页内
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -562,406 +306,51 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
                 top: 0,
                 left: 0,
                 right: 0,
-                child: GestureDetector(
-                  onTap: _keepVisible,
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.black87, Colors.transparent],
-                      ),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black87, Colors.transparent],
                     ),
-                    child: SafeArea(
-                      child: Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.arrow_back,
-                                color: Colors.white, size: 28),
-                            onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  child: SafeArea(
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white, size: 28),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 16),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          Expanded(
-                            child: Text(
-                              widget.title,
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 16),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                        ),
+                        Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(4),
                           ),
-                          Container(
-                            margin: const EdgeInsets.only(right: 12),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.redAccent,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text('LIVE',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ),
+                          child: const Text('LIVE',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
           ],
         ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FullscreenVideoPage extends StatefulWidget {
-  final VideoPlayerController controller;
-  final String title;
-  final bool isLive;
-  const _FullscreenVideoPage({
-    required this.controller,
-    required this.title,
-    required this.isLive,
-  });
-
-  @override
-  State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
-}
-
-class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
-  bool _showControls = true;
-  Timer? _hideTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    _armHide();
-  }
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
-        overlays: SystemUiOverlay.values);
-    super.dispose();
-  }
-
-  void _armHide() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _showControls = false);
-    });
-  }
-
-  void _toggleControls() {
-    setState(() => _showControls = !_showControls);
-    if (_showControls) _armHide();
-  }
-
-  void _keepVisible() {
-    setState(() => _showControls = true);
-    _armHide();
-  }
-
-  void _exit() {
-    Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTap: _toggleControls,
-        onDoubleTap: _exit,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: widget.controller.value.size.width,
-                  height: widget.controller.value.size.height,
-                  child: VideoPlayer(widget.controller),
-                ),
-              ),
-            ),
-            if (_showControls)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: GestureDetector(
-                  onTap: _keepVisible,
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.black87, Colors.transparent],
-                      ),
-                    ),
-                    child: SafeArea(
-                      child: Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.arrow_back,
-                                color: Colors.white, size: 28),
-                            onPressed: _exit,
-                          ),
-                          Expanded(
-                            child: Text(
-                              widget.title,
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 16),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (widget.isLive)
-                            Container(
-                              margin: const EdgeInsets.only(right: 12),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: Colors.redAccent,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text('LIVE',
-                                  style: TextStyle(
-                                      color: Colors.white, fontSize: 11)),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_showControls)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: GestureDetector(
-                  onTap: _keepVisible,
-                  child: _FullscreenBar(controller: widget.controller, onExit: _exit),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FullscreenBar extends StatefulWidget {
-  final VideoPlayerController controller;
-  final VoidCallback onExit;
-  const _FullscreenBar({required this.controller, required this.onExit});
-  @override
-  State<_FullscreenBar> createState() => _FullscreenBarState();
-}
-
-class _FullscreenBarState extends State<_FullscreenBar> {
-  bool _playing = true;
-  bool _buf = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _playing = widget.controller.value.isPlaying;
-    _buf = widget.controller.value.isBuffering;
-    widget.controller.addListener(_onTick);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onTick);
-    super.dispose();
-  }
-
-  void _onTick() {
-    final val = widget.controller.value;
-    if (mounted && (val.isPlaying != _playing || val.isBuffering != _buf)) {
-      setState(() {
-        _playing = val.isPlaying;
-        _buf = val.isBuffering;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        children: [
-          if (_buf)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.6,
-                  color: Colors.white,
-                ),
-              ),
-            )
-          else
-            IconButton(
-              icon: Icon(
-                _playing ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
-                size: 40,
-              ),
-              onPressed: () {
-                if (_playing) {
-                  widget.controller.pause();
-                } else {
-                  widget.controller.play();
-                }
-                setState(() => _playing = !_playing);
-              },
-            ),
-          Container(
-            margin: const EdgeInsets.only(left: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.redAccent,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: const Text(
-              'LIVE',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 36),
-            onPressed: widget.onExit,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═══ 控制栏（小窗模式）═══
-// 只在播放/暂停状态变化时重建，避免 ValueListenableBuilder 每帧读 position 造成卡顿
-class _ControlsBar extends StatefulWidget {
-  final VideoPlayerController controller;
-  final bool isLive;
-  final VoidCallback onFullscreen;
-  const _ControlsBar({
-    required this.controller,
-    required this.isLive,
-    required this.onFullscreen,
-  });
-
-  @override
-  State<_ControlsBar> createState() => _ControlsBarState();
-}
-
-class _ControlsBarState extends State<_ControlsBar> {
-  bool _playing = true;
-  bool _buf = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _playing = widget.controller.value.isPlaying;
-    _buf = widget.controller.value.isBuffering;
-    widget.controller.addListener(_onTick);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onTick);
-    super.dispose();
-  }
-
-  void _onTick() {
-    final val = widget.controller.value;
-    if (mounted && (val.isPlaying != _playing || val.isBuffering != _buf)) {
-      setState(() {
-        _playing = val.isPlaying;
-        _buf = val.isBuffering;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black54,
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Row(
-        children: [
-          // 缓冲中：转圈，不显示暂停
-          if (_buf)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  color: Colors.white,
-                ),
-              ),
-            )
-          else
-            IconButton(
-              icon: Icon(
-                _playing ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
-                size: 28,
-              ),
-              onPressed: () {
-                if (_playing) {
-                  widget.controller.pause();
-                } else {
-                  widget.controller.play();
-                }
-                setState(() => _playing = !_playing);
-              },
-            ),
-          // LIVE 徽标紧挨播放/暂停键
-          Container(
-            margin: const EdgeInsets.only(left: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.redAccent,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: const Text(
-              'LIVE',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.fullscreen, color: Colors.white, size: 28),
-            onPressed: widget.onFullscreen,
-          ),
-        ],
       ),
     );
   }
