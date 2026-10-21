@@ -16,7 +16,7 @@ class VideoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '视频直播系统',
+      title: 'Live',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed: const Color(0xFF2563EB),

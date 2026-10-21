@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../config.dart';
+
 import 'home_page.dart';
+import '../services/endpoint_probe.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -18,10 +20,33 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscure = true;
   String? _error;
 
+  List<EndpointHealth> _health = [];
+  bool _probing = true;
+
   @override
   void initState() {
     super.initState();
     _serverCtrl.text = ApiClient.instance.baseUrl;
+    _autoProbe();
+  }
+
+  Future<void> _autoProbe() async {
+    setState(() => _probing = true);
+    try {
+      final list = await EndpointProbe.probeAll();
+      if (!mounted) return;
+      setState(() {
+        _health = list;
+        _probing = false;
+      });
+      // 自动选优：优先能跟上 2s 分片的出口
+      final best = await EndpointProbe.bestForLive();
+      if (best != null && mounted) {
+        setState(() => _serverCtrl.text = best.baseUrl);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _probing = false);
+    }
   }
 
   @override
@@ -187,7 +212,46 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 onSubmitted: (_) => _login(),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+              if (_probing)
+                const LinearProgressIndicator(minHeight: 2)
+              else if (_health.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final h in _health)
+                        Chip(
+                          avatar: Icon(
+                            h.ok
+                                ? (h.keepsUp
+                                    ? Icons.signal_cellular_alt
+                                    : Icons.speed)
+                                : Icons.wifi_off,
+                            size: 16,
+                            color: h.ok
+                                ? (h.keepsUp ? Colors.green : Colors.orange)
+                                : Colors.red,
+                          ),
+                          label: Text(
+                            h.label,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              _IspSelector(
+                currentUrl: _serverCtrl.text,
+                onPick: (ep) {
+                  setState(() {
+                    _serverCtrl.text = ep.baseUrl;
+                  });
+                },
+              ),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 height: 48,
@@ -203,14 +267,24 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              TextButton.icon(
-                onPressed: _showServerSheet,
-                icon: const Icon(Icons.settings_ethernet, size: 18),
-                label: Text(
-                  '服务器: ${_serverCtrl.text}',
-                  style: const TextStyle(fontSize: 12),
-                  overflow: TextOverflow.ellipsis,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: _autoProbe,
+                    icon: const Icon(Icons.speed, size: 18),
+                    label: const Text('重新测速', style: TextStyle(fontSize: 12)),
+                  ),
+                  TextButton.icon(
+                    onPressed: _showServerSheet,
+                    icon: const Icon(Icons.settings_ethernet, size: 18),
+                    label: Text(
+                      '服务器: ${_serverCtrl.text}',
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
               if (_error != null) ...[
                 const SizedBox(height: 16),
@@ -321,4 +395,39 @@ Future<bool?> showChangePasswordDialog(BuildContext context,
     ),
   );
   return result;
+}
+
+/// 出口选择：移动 / 电信
+class _IspSelector extends StatelessWidget {
+  final String currentUrl;
+  final ValueChanged<ServerEndpoint> onPick;
+  const _IspSelector({required this.currentUrl, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) {
+    final matched = matchEndpoint(currentUrl);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('网络出口',
+            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final ep in kServerEndpoints)
+              ChoiceChip(
+                label: Text(ep.label),
+                avatar: Icon(
+                  matched?.id == ep.id ? Icons.check_circle : Icons.router,
+                  size: 18,
+                ),
+                selected: matched?.id == ep.id,
+                onSelected: (_) => onPick(ep),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
 }

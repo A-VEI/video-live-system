@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../api/api_client.dart';
+import '../config.dart';
+import '../services/endpoint_probe.dart';
 
 class VideoPage extends StatefulWidget {
   const VideoPage({super.key});
@@ -92,6 +94,15 @@ class _VideoPageState extends State<VideoPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      // 播放失败：尝试自动切换到另一条出口（只切换一次）
+      final switched = await _trySwitchEndpoint();
+      if (switched) {
+        final idx2 = _activeIdx;
+        if (idx2 != null) {
+          await _playStream(idx2);
+          return;
+        }
+      }
       setState(() {
         _videoLoading = false;
         _videoCtrl = null;
@@ -100,7 +111,30 @@ class _VideoPageState extends State<VideoPage> {
     }
   }
 
+  bool _failoverTried = false;
+
+  Future<bool> _trySwitchEndpoint() async {
+    if (_failoverTried) return false;
+    _failoverTried = true;
+    try {
+      final best = await EndpointProbe.bestForLive();
+      if (best == null) return false;
+      final cur = ApiClient.instance.baseUrl;
+      if (best.baseUrl == cur) return false;
+      await ApiClient.instance.setBaseUrl(best.baseUrl);
+      await ApiClient.instance.getStreams();
+      if (!mounted) return true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已自动切换到 ${best.label}')),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _retryCurrent() async {
+    _failoverTried = false;
     final idx = _activeIdx;
     if (idx == null) return;
     // 先刷新签名 URL 再重试
@@ -405,11 +439,13 @@ class _FullscreenBar extends StatefulWidget {
 
 class _FullscreenBarState extends State<_FullscreenBar> {
   bool _playing = true;
+  bool _buf = false;
 
   @override
   void initState() {
     super.initState();
     _playing = widget.controller.value.isPlaying;
+    _buf = widget.controller.value.isBuffering;
     widget.controller.addListener(_onTick);
   }
 
@@ -420,8 +456,13 @@ class _FullscreenBarState extends State<_FullscreenBar> {
   }
 
   void _onTick() {
-    final p = widget.controller.value.isPlaying;
-    if (p != _playing && mounted) setState(() => _playing = p);
+    final val = widget.controller.value;
+    if (mounted && (val.isPlaying != _playing || val.isBuffering != _buf)) {
+      setState(() {
+        _playing = val.isPlaying;
+        _buf = val.isBuffering;
+      });
+    }
   }
 
   @override
@@ -430,21 +471,34 @@ class _FullscreenBarState extends State<_FullscreenBar> {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(
-              _playing ? Icons.pause : Icons.play_arrow,
-              color: Colors.white,
-              size: 40,
+          if (_buf)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.6,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: Icon(
+                _playing ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 40,
+              ),
+              onPressed: () {
+                if (_playing) {
+                  widget.controller.pause();
+                } else {
+                  widget.controller.play();
+                }
+                setState(() => _playing = !_playing);
+              },
             ),
-            onPressed: () {
-              if (_playing) {
-                widget.controller.pause();
-              } else {
-                widget.controller.play();
-              }
-              setState(() => _playing = !_playing);
-            },
-          ),
           const Text(
             '直播',
             style: TextStyle(color: Colors.white70, fontSize: 14),
@@ -478,11 +532,13 @@ class _ControlsBar extends StatefulWidget {
 
 class _ControlsBarState extends State<_ControlsBar> {
   bool _playing = true;
+  bool _buf = false;
 
   @override
   void initState() {
     super.initState();
     _playing = widget.controller.value.isPlaying;
+    _buf = widget.controller.value.isBuffering;
     widget.controller.addListener(_onTick);
   }
 
@@ -493,9 +549,12 @@ class _ControlsBarState extends State<_ControlsBar> {
   }
 
   void _onTick() {
-    final p = widget.controller.value.isPlaying;
-    if (p != _playing && mounted) {
-      setState(() => _playing = p);
+    final val = widget.controller.value;
+    if (mounted && (val.isPlaying != _playing || val.isBuffering != _buf)) {
+      setState(() {
+        _playing = val.isPlaying;
+        _buf = val.isBuffering;
+      });
     }
   }
 
@@ -506,21 +565,35 @@ class _ControlsBarState extends State<_ControlsBar> {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(
-              _playing ? Icons.pause : Icons.play_arrow,
-              color: Colors.white,
-              size: 28,
+          // 缓冲中：转圈，不显示暂停
+          if (_buf)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: Icon(
+                _playing ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 28,
+              ),
+              onPressed: () {
+                if (_playing) {
+                  widget.controller.pause();
+                } else {
+                  widget.controller.play();
+                }
+                setState(() => _playing = !_playing);
+              },
             ),
-            onPressed: () {
-              if (_playing) {
-                widget.controller.pause();
-              } else {
-                widget.controller.play();
-              }
-              setState(() => _playing = !_playing);
-            },
-          ),
           // 直播：不显示 position/duration 读秒
           const Expanded(
             child: Text(
