@@ -40,7 +40,7 @@ jobs:
         run: flutter analyze --no-fatal-infos || true
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --dart-define=BUILD_ID=${{ github.run_number }}
         env:
           # 覆盖默认服务器；不传则用 config.dart 中默认值
           BASE_URL: ${{ vars.BASE_URL || 'http://112.25.181.94:8119' }}

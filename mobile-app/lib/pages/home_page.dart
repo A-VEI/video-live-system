@@ -58,23 +58,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  bool _webVideoSaving = false;
+
+  /// 点开关 → 转圈等服务器 → 成功后才改 UI
   Future<void> _toggleWebVideo(bool v) async {
-    // 先改 UI，再后台写服务器，避免点开关卡顿
-    setState(() => _webVideo = v);
+    if (_webVideoSaving) return;
+    setState(() => _webVideoSaving = true);
     try {
       await ApiClient.instance.setWebVideoEnabled(v);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(v ? '已允许网页观看' : '已关闭网页观看，请用 App')),
-        );
-      }
+      if (!mounted) return;
+      setState(() {
+        _webVideo = v;
+        _webVideoSaving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(v ? '已允许网页观看' : '已关闭网页观看，请用 App')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e is ApiException ? e.message : '设置失败')),
-        );
-        setState(() => _webVideo = !v);
-      }
+      if (!mounted) return;
+      setState(() => _webVideoSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : '设置失败')),
+      );
     }
   }
 
@@ -307,11 +312,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             if (_role == 'admin')
               SwitchListTile(
-                secondary: const Icon(Icons.public),
+                secondary: _webVideoSaving
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.public),
                 title: const Text('网页观看'),
-                subtitle: Text(_webVideo ? 'Web 端可播放' : '仅 App 可观看'),
+                subtitle: _webVideoSaving
+                    ? const Text('正在保存…')
+                    : Text(_webVideo ? 'Web 端可播放' : '仅 App 可观看'),
                 value: _webVideo,
-                onChanged: _toggleWebVideo,
+                onChanged: _webVideoSaving ? null : _toggleWebVideo,
               ),
             ListTile(
               leading: const Icon(Icons.system_update_alt),
