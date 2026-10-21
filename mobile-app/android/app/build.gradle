@@ -12,9 +12,9 @@ android {
         applicationId "com.szxf.video_live"
         minSdk 21
         targetSdk 34
-        // Keep in sync with pubspec.yaml version: 1.0.4+4
-        versionCode 4
-        versionName "1.0.4"
+        // Keep in sync with pubspec.yaml version: 1.0.5+5
+        versionCode 5
+        versionName "1.0.5"
     }
 
     signingConfigs {

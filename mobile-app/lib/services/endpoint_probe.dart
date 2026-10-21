@@ -48,7 +48,7 @@ class EndpointHealth {
     final parts = <String>['${endpoint.label}'];
     if (segMs != null) parts.add('分片${segMs}ms');
     if (mbps != null) parts.add('${mbps!.toStringAsFixed(1)}Mbps');
-    parts.add('延迟${apiMs}ms');
+    parts.add('${apiMs}ms');
     if (keepsUp) parts.add('流畅');
     return parts.join(' ');
   }

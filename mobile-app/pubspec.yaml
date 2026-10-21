@@ -3,7 +3,7 @@ description: Video live streaming app
 publish_to: 'none'
 # 版本号单一来源：构建后写入 versionName，运行时由 package_info_plus 读取
 # 服务端 VERSION 文件需与此主版本号对齐
-version: 1.0.4+4
+version: 1.0.5+5
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -19,6 +19,7 @@ dependencies:
   path_provider: ^2.1.0
   package_info_plus: ^8.0.0
   crypto: ^3.0.3
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:

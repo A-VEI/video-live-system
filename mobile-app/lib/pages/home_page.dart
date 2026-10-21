@@ -21,6 +21,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String _role = 'user';
   bool _loadingMe = true;
   bool _switchingIsp = false;
+  bool _webVideo = true;
 
   @override
   void initState() {
@@ -29,6 +30,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _name = ApiClient.instance.displayName ?? '';
     _role = ApiClient.instance.role;
     _loadMe();
+    _loadWebVideo();
   }
 
   @override
@@ -42,6 +44,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // 切后台再回来刷新，避免白屏
     if (state == AppLifecycleState.resumed && mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _loadWebVideo() async {
+    if (!ApiClient.instance.isAdmin) return;
+    try {
+      final v = await ApiClient.instance.getWebVideoEnabled();
+      if (mounted) setState(() => _webVideo = v);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleWebVideo(bool v) async {
+    try {
+      await ApiClient.instance.setWebVideoEnabled(v);
+      if (mounted) setState(() => _webVideo = v);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(v ? '已允许网页观看' : '已关闭网页观看，请用 App')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '设置失败')),
+        );
+        setState(() => _webVideo = !v);
+      }
     }
   }
 
@@ -93,7 +122,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             for (final e in kServerEndpoints)
               RadioListTile<String>(
-                title: Text('${e.label}  ${e.host}'),
+                title: Text(e.label),
                 subtitle: e == cur ? const Text('当前') : null,
                 value: e.id,
                 groupValue: cur?.id,
@@ -181,7 +210,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.person_outline),
               title: Text(_name.isNotEmpty ? _name : '用户'),
-              subtitle: Text('$_role · ${ApiClient.instance.baseUrl}'),
+              subtitle: Text('$_role · ${matchEndpoint(ApiClient.instance.baseUrl)?.label ?? '自定义线路'}'),
             ),
             const Divider(height: 1),
             ListTile(
@@ -195,6 +224,57 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _quickSwitchIsp();
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.speed),
+              title: const Text('播放引擎'),
+              subtitle: Text(
+                '当前: ${kEngineLabels[ApiClient.instance.playEngine]}',
+              ),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final e = await showModalBottomSheet<PlayEngine>(
+                  context: context,
+                  builder: (c) => SafeArea(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const ListTile(
+                          title: Text('播放引擎'),
+                          subtitle: Text('流畅=与网页相同缓冲策略；原生=系统播放器'),
+                        ),
+                        for (final e in PlayEngine.values)
+                          RadioListTile<PlayEngine>(
+                            title: Text(kEngineLabels[e]!),
+                            value: e,
+                            groupValue: ApiClient.instance.playEngine,
+                            onChanged: (v) => Navigator.pop(c, v),
+                          ),
+                        const SizedBox(height: 8),
+                      ],
+                    ),
+                  ),
+                );
+                if (e != null) {
+                  await ApiClient.instance.setPlayEngine(e);
+                  if (mounted) setState(() {});
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text(
+                              '播放引擎已切换为 ${kEngineLabels[e]}，重进频道生效')),
+                    );
+                  }
+                }
+              },
+            ),
+            if (_role == 'admin')
+              SwitchListTile(
+                secondary: const Icon(Icons.public),
+                title: const Text('网页观看'),
+                subtitle: Text(_webVideo ? 'Web 端可播放' : '仅 App 可观看'),
+                value: _webVideo,
+                onChanged: _toggleWebVideo,
+              ),
             ListTile(
               leading: const Icon(Icons.system_update_alt),
               title: const Text('检查更新'),

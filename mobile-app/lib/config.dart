@@ -6,14 +6,13 @@ const String kDefaultBaseUrl = String.fromEnvironment(
   defaultValue: 'http://112.25.181.94:8119',
 );
 
-/// 与服务端 VERSION 文件对齐；运行时以 package_info 的 versionName 为准。
 const String kFallbackAppVersion = '1.0.5';
 
-/// 服务器双出口：移动 / 电信。端口固定 8119。
+/// 线路：界面只展示名称，不显示 IP
 class ServerEndpoint {
   final String id;
-  final String label;
-  final String host;
+  final String label; // 展示名
+  final String host;  // 内部使用，不进 UI
   final int port;
   const ServerEndpoint(this.id, this.label, this.host, {this.port = 8119});
 
@@ -21,8 +20,8 @@ class ServerEndpoint {
 }
 
 const List<ServerEndpoint> kServerEndpoints = [
-  ServerEndpoint('cmcc', '移动', '112.25.181.94'),
-  ServerEndpoint('ctcc', '电信', '222.92.63.222'),
+  ServerEndpoint('cmcc', '移动线路', '112.25.181.94'),
+  ServerEndpoint('ctcc', '电信线路', '222.92.63.222'),
 ];
 
 ServerEndpoint? findEndpointById(String? id) {
@@ -40,3 +39,11 @@ ServerEndpoint? matchEndpoint(String baseUrl) {
   }
   return null;
 }
+
+/// 播放引擎
+enum PlayEngine { hlsjs, native }
+
+const kEngineLabels = {
+  PlayEngine.hlsjs: '流畅',
+  PlayEngine.native: '原生',
+};

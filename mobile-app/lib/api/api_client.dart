@@ -30,6 +30,11 @@ class ApiClient {
     _instance._token = prefs.getString('auth_token');
     _instance._name = prefs.getString('auth_name');
     _instance._role = prefs.getString('auth_role') ?? 'user';
+    final eng = prefs.getString('play_engine');
+    _instance._engine = PlayEngine.values.firstWhere(
+      (e) => e.name == eng,
+      orElse: () => PlayEngine.hlsjs,
+    );
     _instance._setupDio();
     return _instance;
   }
@@ -259,6 +264,51 @@ class ApiClient {
     await _mutate('/api/mobile/change-password',
         method: 'POST',
         data: {'old_password': oldPassword, 'new_password': newPassword});
+  }
+
+
+  // ── 播放引擎（流畅=Web/hls.js，原生=ExoPlayer）──
+  PlayEngine get playEngine {
+    // default smooth
+    return _engine ?? PlayEngine.hlsjs;
+  }
+
+  PlayEngine? _engine;
+
+  Future<void> setPlayEngine(PlayEngine e) async {
+    _engine = e;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('play_engine', e.name);
+  }
+
+  Future<PlayEngine> loadPlayEngine() async {
+    final prefs = await SharedPreferences.getInstance();
+    final n = prefs.getString('play_engine');
+    _engine = PlayEngine.values.firstWhere(
+      (e) => e.name == n,
+      orElse: () => PlayEngine.hlsjs,
+    );
+    return _engine!;
+  }
+
+  // ── 网页观看开关 ──
+  Future<bool> getWebVideoEnabled() async {
+    try {
+      final r = await _dio.get('/api/settings');
+      if (r.statusCode == 200 && r.data is Map) {
+        return (r.data as Map)['web_video_enabled'] == 1 ||
+            (r.data as Map)['web_video_enabled'] == true;
+      }
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: '获取设置失败');
+    }
+    return true;
+  }
+
+  Future<bool> setWebVideoEnabled(bool enabled) async {
+    await _mutate('/api/settings/web_video',
+        method: 'PUT', data: {'value': enabled ? 1 : 0});
+    return enabled;
   }
 
   // ── 版本 ──

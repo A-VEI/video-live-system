@@ -4,6 +4,8 @@ import 'package:video_player/video_player.dart';
 import '../api/api_client.dart';
 import '../config.dart';
 import '../services/endpoint_probe.dart';
+import 'hls_webview_player.dart';
+import '../config.dart';
 
 class VideoPage extends StatefulWidget {
   const VideoPage({super.key});
@@ -20,6 +22,8 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   bool _videoLoading = false;
   String? _error;
   bool _isLive = true;
+  bool _useWebEngine = true;
+  String? _webProxyUrl;
 
   @override
   void initState() {
@@ -65,12 +69,24 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   }
 
   Future<void> _playStream(int idx) async {
-    if (_activeIdx == idx && _videoCtrl?.value.isPlaying == true) return;
+    if (_activeIdx == idx && (_videoCtrl?.value.isPlaying == true || _webProxyUrl != null)) return;
     setState(() {
       _activeIdx = idx;
       _videoLoading = true;
       _error = null;
+      _webProxyUrl = null;
     });
+    _useWebEngine = ApiClient.instance.playEngine == PlayEngine.hlsjs;
+    if (_useWebEngine) {
+      final stream = _streams[idx] as Map;
+      final raw = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
+      setState(() {
+        _webProxyUrl = ApiClient.instance.absoluteUrl(raw);
+        _videoLoading = false;
+        _isLive = true;
+      });
+      return;
+    }
     final old = _videoCtrl;
     _videoCtrl = null;
     // 先释放旧控制器，避免闪烁时并发初始化
@@ -177,7 +193,33 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
 
     return Column(
       children: [
-        if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
+        if (_useWebEngine && _webProxyUrl != null)
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Stack(
+              children: [
+                HlsWebViewPlayer(proxyUrl: _webProxyUrl!),
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('LIVE',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
           AspectRatio(
             aspectRatio: _videoCtrl!.value.aspectRatio > 0
                 ? _videoCtrl!.value.aspectRatio

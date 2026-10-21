@@ -70,7 +70,7 @@ class _LoginPageState extends State<LoginPage> {
     }
     final server = _serverCtrl.text.trim();
     if (server.isEmpty || !server.startsWith('http://')) {
-      setState(() => _error = '服务器地址须以 http:// 开头（本项目使用 HTTP）');
+      setState(() => _error = '请选择线路');
       return;
     }
     setState(() {
@@ -119,17 +119,17 @@ class _LoginPageState extends State<LoginPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('服务器地址',
+            const Text('选择线路',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('默认: $kDefaultBaseUrl',
+            Text('双出口自动选优，可手动切换',
                 style: TextStyle(fontSize: 12, color: Colors.grey[600])),
             const SizedBox(height: 16),
             TextField(
               controller: _serverCtrl,
               keyboardType: TextInputType.url,
               decoration: InputDecoration(
-                labelText: 'http://主机:端口',
+                labelText: '线路',
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12)),
                 prefixIcon: const Icon(Icons.dns),
@@ -279,7 +279,7 @@ class _LoginPageState extends State<LoginPage> {
                     onPressed: _showServerSheet,
                     icon: const Icon(Icons.settings_ethernet, size: 18),
                     label: Text(
-                      '服务器: ${_serverCtrl.text}',
+                      '线路: ${matchEndpoint(_serverCtrl.text)?.label ?? '自定义'}',
                       style: const TextStyle(fontSize: 12),
                       overflow: TextOverflow.ellipsis,
                     ),
