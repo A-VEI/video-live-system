@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -491,6 +492,7 @@ class _FullscreenWebViewPage extends StatefulWidget {
 
 class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
   bool _showControls = true;
+  Timer? _hideTimer;
 
   @override
   void initState() {
@@ -500,70 +502,103 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
       DeviceOrientation.landscapeRight,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _armHide();
   }
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
         overlays: SystemUiOverlay.values);
     super.dispose();
   }
 
+  void _armHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _showControls = false);
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+    if (_showControls) _armHide();
+  }
+
+  void _keepVisible() {
+    setState(() => _showControls = true);
+    _armHide();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTap: () => setState(() => _showControls = !_showControls),
-        child: Stack(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        _hideTimer?.cancel();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
           fit: StackFit.expand,
           children: [
             HlsWebViewPlayer(proxyUrl: widget.proxyUrl),
+            // 盖在 WebView 上的点按层：视频只需播放，无需点到网页内
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _toggleControls,
+                onDoubleTap: () => Navigator.of(context).pop(),
+              ),
+            ),
             if (_showControls)
               Positioned(
                 top: 0,
                 left: 0,
                 right: 0,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black54, Colors.transparent],
+                child: GestureDetector(
+                  onTap: _keepVisible,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.black87, Colors.transparent],
+                      ),
                     ),
-                  ),
-                  child: SafeArea(
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back,
-                              color: Colors.white, size: 28),
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                        Expanded(
-                          child: Text(
-                            widget.title,
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 16),
-                            overflow: TextOverflow.ellipsis,
+                    child: SafeArea(
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white, size: 28),
+                            onPressed: () => Navigator.of(context).pop(),
                           ),
-                        ),
-                        Container(
-                          margin: const EdgeInsets.only(right: 12),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent,
-                            borderRadius: BorderRadius.circular(4),
+                          Expanded(
+                            child: Text(
+                              widget.title,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 16),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          child: const Text('LIVE',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold)),
-                        ),
-                      ],
+                          Container(
+                            margin: const EdgeInsets.only(right: 12),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('LIVE',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -575,7 +610,6 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
   }
 }
 
-// ═══ 独立全屏页面 ═══
 class _FullscreenVideoPage extends StatefulWidget {
   final VideoPlayerController controller;
   final String title;
@@ -592,6 +626,7 @@ class _FullscreenVideoPage extends StatefulWidget {
 
 class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   bool _showControls = true;
+  Timer? _hideTimer;
 
   @override
   void initState() {
@@ -601,14 +636,33 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
       DeviceOrientation.landscapeRight,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _armHide();
   }
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
         overlays: SystemUiOverlay.values);
     super.dispose();
+  }
+
+  void _armHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _showControls = false);
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+    if (_showControls) _armHide();
+  }
+
+  void _keepVisible() {
+    setState(() => _showControls = true);
+    _armHide();
   }
 
   void _exit() {
@@ -620,7 +674,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
-        onTap: () => setState(() => _showControls = !_showControls),
+        onTap: _toggleControls,
+        onDoubleTap: _exit,
         child: Stack(
           children: [
             Positioned.fill(
@@ -638,17 +693,17 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                 top: 0,
                 left: 0,
                 right: 0,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black54, Colors.transparent],
+                child: GestureDetector(
+                  onTap: _keepVisible,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.black87, Colors.transparent],
+                      ),
                     ),
-                  ),
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: SafeArea(
                       child: Row(
                         children: [
                           IconButton(
@@ -664,6 +719,19 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          if (widget.isLive)
+                            Container(
+                              margin: const EdgeInsets.only(right: 12),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text('LIVE',
+                                  style: TextStyle(
+                                      color: Colors.white, fontSize: 11)),
+                            ),
                         ],
                       ),
                     ),
@@ -675,14 +743,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Colors.black54, Colors.transparent],
-                    ),
-                  ),
+                child: GestureDetector(
+                  onTap: _keepVisible,
                   child: _FullscreenBar(controller: widget.controller, onExit: _exit),
                 ),
               ),
@@ -691,11 +753,8 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
       ),
     );
   }
-
-
 }
 
-// 全屏底栏：只在播放状态变化时重建，不显示读秒
 class _FullscreenBar extends StatefulWidget {
   final VideoPlayerController controller;
   final VoidCallback onExit;
