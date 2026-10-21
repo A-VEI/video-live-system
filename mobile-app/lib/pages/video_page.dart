@@ -111,8 +111,7 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
       fit: StackFit.expand,
       children: [
         HlsWebViewPlayer(
-          key: ValueKey('web-$_webProxyUrl'),
-          proxyUrl: _webProxyUrl!,
+                    proxyUrl: _webProxyUrl!,
           onFallbackNative: () {
             // 仅保留流畅引擎：失败时重试当前频道
             if (!mounted) return;
@@ -291,8 +290,7 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
           fit: StackFit.expand,
           children: [
             HlsWebViewPlayer(
-              key: ValueKey('fs-${widget.proxyUrl}'),
-              proxyUrl: widget.proxyUrl,
+                            proxyUrl: widget.proxyUrl,
             ),
             Positioned.fill(
               child: GestureDetector(

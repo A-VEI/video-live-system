@@ -1,5 +1,5 @@
-/// 网页同款 HLS 播放（hls.js + WebView）
-/// 切后台再回来自动 reload，避免白屏
+/// 网页同款 HLS（WebView + hls.js）
+/// 切频道只换地址，不重建 WebView（避免系统卡死）
 library;
 
 import 'dart:async';
@@ -24,11 +24,10 @@ class HlsWebViewPlayer extends StatefulWidget {
 class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
     with WidgetsBindingObserver {
   late final WebViewController _c;
+  String _abs = '';
   bool _ready = false;
   String _status = '正在加载…';
   Timer? _fallbackTimer;
-  late final Uri _playerUri;
-  late final String _abs;
 
   String _jsQuote(String s) {
     final escaped = s
@@ -49,8 +48,23 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
   Future<void> _boot() async {
     try {
       await _c.runJavaScript(
-          'window.__HLS_SRC__ = ${_jsQuote(_abs)}; if(window.__hlsBoot) window.__hlsBoot();');
+          'window.__HLS_SRC__ = ${_jsQuote(_abs)}; if(window.__hlsBoot) window.__hlsBoot(true);');
     } catch (_) {}
+  }
+
+  void _onStatus(String st) {
+    if (!mounted) return;
+    setState(() => _status = st);
+    if (st == 'playing' || st.isEmpty) {
+      setState(() => _status = '');
+    }
+    if (st.contains('不支持') || st.contains('缺少') || st.contains('播放组件未加载')) {
+      _scheduleFallback();
+    } else if (st.contains('播放出错')) {
+      _scheduleFallback(const Duration(seconds: 3));
+    } else if (st.contains('网络中断')) {
+      _scheduleFallback(const Duration(seconds: 8));
+    }
   }
 
   @override
@@ -58,9 +72,7 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _abs = ApiClient.instance.absoluteUrl(widget.proxyUrl);
-    final base = ApiClient.instance.baseUrl;
-    _playerUri = Uri.parse('$base/static/mobile-player.html')
-        .replace(queryParameters: {'src': _abs});
+    final playerUri = Uri.parse('${ApiClient.instance.baseUrl}/static/mobile-player.html');
 
     _c = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -69,23 +81,7 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
         'Flutter',
         onMessageReceived: (msg) {
           final s = msg.message;
-          if (!s.startsWith('status:')) return;
-          final st = s.substring(7);
-          if (mounted) setState(() => _status = st);
-          // 瞬时「网络中断，重试中」不立刻回退；播放中的 status:playing 清掉文案
-          if (st == 'playing' || st.isEmpty) {
-            if (mounted) setState(() => _status = '');
-          }
-          if (st.contains('不支持') ||
-              st.contains('缺少') ||
-              st.contains('播放组件未加载')) {
-            _scheduleFallback();
-          } else if (st.contains('播放出错')) {
-            _scheduleFallback(const Duration(seconds: 3));
-          } else if (st.contains('网络中断')) {
-            // 网络抖动：稍后若仍失败再回退
-            _scheduleFallback(const Duration(seconds: 8));
-          }
+          if (s.startsWith('status:')) _onStatus(s.substring(7));
         },
       )
       ..setNavigationDelegate(
@@ -96,11 +92,19 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
           },
           onWebResourceError: (e) {
             debugPrint('webview error ${e.errorCode} ${e.description}');
-            _scheduleFallback();
           },
         ),
       )
-      ..loadRequest(_playerUri);
+      ..loadRequest(playerUri);
+  }
+
+  @override
+  void didUpdateWidget(covariant HlsWebViewPlayer old) {
+    super.didUpdateWidget(old);
+    if (old.proxyUrl != widget.proxyUrl) {
+      _abs = ApiClient.instance.absoluteUrl(widget.proxyUrl);
+      _boot(); // 同一 WebView 内换流
+    }
   }
 
   @override
@@ -112,13 +116,14 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 切回前台：WebView 会白屏，这里强制重载
     if (state == AppLifecycleState.resumed && mounted) {
       setState(() {
         _ready = false;
         _status = '正在恢复…';
       });
-      _c.reload();
+      try {
+        _c.reload();
+      } catch (_) {}
     }
   }
 
@@ -128,7 +133,7 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
       fit: StackFit.expand,
       children: [
         WebViewWidget(controller: _c),
-        if (!_ready || _status.contains('加载组件') || _status == '正在恢复…')
+        if (!_ready || _status.contains('加载') || _status == '正在恢复…')
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -136,8 +141,7 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
                 const CircularProgressIndicator(color: Colors.white),
                 const SizedBox(height: 12),
                 Text(_status,
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 12)),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),
