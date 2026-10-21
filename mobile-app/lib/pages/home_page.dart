@@ -16,6 +16,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _idx = 0;
   String _name = '';
   String _role = 'user';
@@ -249,18 +250,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
-  void _openSettings() {
-    showModalBottomSheet(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+  /// 右侧抽屉：设置
+  Widget _buildSettingsDrawer() {
+    return Drawer(
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
+            const DrawerHeader(
+              margin: EdgeInsets.zero,
+              padding: EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(Icons.settings, size: 32),
+                  SizedBox(height: 8),
+                  Text('设置',
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
             ListTile(
               leading: const Icon(Icons.person_outline),
               title: Text(_name.isNotEmpty ? _name : '用户'),
-              subtitle: Text('$_role · ${matchEndpoint(ApiClient.instance.baseUrl)?.label ?? '自定义线路'}'),
+              subtitle: Text(
+                  '$_role · ${matchEndpoint(ApiClient.instance.baseUrl)?.label ?? '自定义线路'}'),
             ),
             const Divider(height: 1),
             ListTile(
@@ -270,7 +286,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 matchEndpoint(ApiClient.instance.baseUrl)?.label ?? '自定义',
               ),
               onTap: () {
-                Navigator.pop(ctx);
+                Navigator.pop(context);
                 _quickSwitchIsp();
               },
             ),
@@ -281,7 +297,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 '当前: ${kEngineLabels[ApiClient.instance.playEngine]}',
               ),
               onTap: () async {
-                Navigator.pop(ctx);
+                Navigator.pop(context);
                 final e = await showModalBottomSheet<PlayEngine>(
                   context: context,
                   builder: (c) => SafeArea(
@@ -351,9 +367,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   ],
                 ],
               ),
-              subtitle: const Text('手动检查并安装新版本'),
               onTap: () {
-                Navigator.pop(ctx);
+                Navigator.pop(context);
                 _manualUpdate();
               },
             ),
@@ -361,7 +376,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               leading: const Icon(Icons.lock_reset),
               title: const Text('修改密钥'),
               onTap: () {
-                Navigator.pop(ctx);
+                Navigator.pop(context);
                 showChangePasswordDialog(context);
               },
             ),
@@ -369,7 +384,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               leading: const Icon(Icons.logout, color: Colors.red),
               title: const Text('退出登录', style: TextStyle(color: Colors.red)),
               onTap: () {
-                Navigator.pop(ctx);
+                Navigator.pop(context);
                 _logout();
               },
             ),
@@ -380,16 +395,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  List<EndpointHealth> _health = [];
-
-  Future<void> _probeLines() async {
-    try {
-      final list = await EndpointProbe.probeAll();
-      if (mounted) setState(() => _health = list);
-    } catch (_) {}
-  }
-
-  /// 顶栏只读：两线测速 + 推荐标记（不可点击切换）
   Widget _SpeedStrip() {
     if (_health.isEmpty) {
       return Row(
@@ -525,6 +530,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ];
 
     return Scaffold(
+      key: _scaffoldKey,
+      endDrawer: _buildSettingsDrawer(),
       appBar: AppBar(
         titleSpacing: 8,
         title: Row(
@@ -540,7 +547,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               IconButton(
                 tooltip: '设置',
                 icon: const Icon(Icons.settings_outlined),
-                onPressed: _openSettings,
+                onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
               ),
               if (_hasUpdate)
                 Positioned(

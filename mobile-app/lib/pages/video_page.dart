@@ -178,234 +178,272 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   }
 
   @override
+  Widget _videoPlayerBox({double? fixedHeight}) {
+    final video = _useWebEngine && _webProxyUrl != null
+        ? HlsWebViewPlayer(
+            proxyUrl: _webProxyUrl!,
+            onFallbackNative: () {
+              if (!mounted) return;
+              setState(() {
+                _useWebEngine = false;
+                _videoLoading = true;
+                _webProxyUrl = null;
+              });
+              final idx = _activeIdx;
+              if (idx != null) _playStreamNative(idx);
+            },
+          )
+        : (_videoCtrl != null && _videoCtrl!.value.isInitialized)
+            ? Stack(
+                alignment: Alignment.bottomCenter,
+                children: [
+                  VideoPlayer(_videoCtrl!),
+                  _ControlsBar(
+                    controller: _videoCtrl!,
+                    isLive: _isLive,
+                    onFullscreen: _enterFullscreen,
+                  ),
+                ],
+              )
+            : Center(
+                child: _videoLoading
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _error ?? '选择频道开始观看',
+                            style: TextStyle(
+                              color: _error != null
+                                  ? Colors.orange[200]
+                                  : Colors.white54,
+                              fontSize: 14,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          if (_error != null) ...[
+                            const SizedBox(height: 12),
+                            TextButton(
+                              onPressed: _retryCurrent,
+                              child: const Text('重试'),
+                            ),
+                          ],
+                        ],
+                      ),
+              );
+
+    final box = Container(
+      color: Colors.black,
+      width: double.infinity,
+      height: fixedHeight,
+      child: video,
+    );
+
+    if (fixedHeight != null) return box;
+    // 比例盒（竖屏顶部 / 横屏左侧由调用方控制高度）
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: box,
+    );
+  }
+
+  Widget _channelList() {
+    return RefreshIndicator(
+      onRefresh: _loadStreams,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: _streams.length,
+        itemBuilder: (_, i) {
+          final s = _streams[i] as Map;
+          final isActive = _activeIdx == i;
+          final enabled = s['enabled'] == 1 || s['enabled'] == true;
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: isActive
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey[200],
+              child: Text('${i + 1}',
+                  style: TextStyle(
+                    color: isActive ? Colors.white : Colors.grey[600],
+                    fontWeight: FontWeight.bold,
+                  )),
+            ),
+            title: Text(s['name']?.toString() ?? '',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(
+              !enabled
+                  ? '已停用'
+                  : isActive
+                      ? '正在播放…'
+                      : '点击播放',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: isActive
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey),
+            ),
+            trailing: Icon(
+              isActive ? Icons.graphic_eq : Icons.play_circle_outline,
+              color: isActive
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey,
+            ),
+            selected: isActive,
+            selectedTileColor:
+                Theme.of(context).colorScheme.primary.withOpacity(0.05),
+            onTap: enabled ? () => _playStream(i) : null,
+          );
+        },
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
-    return Column(
-      children: [
-        if (_useWebEngine && _webProxyUrl != null)
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: Stack(
-              children: [
-                HlsWebViewPlayer(
-                  proxyUrl: _webProxyUrl!,
-                  onFallbackNative: () {
-                    if (!mounted) return;
-                    setState(() {
-                      _useWebEngine = false;
-                      _videoLoading = true;
-                      _webProxyUrl = null;
-                    });
-                    final idx = _activeIdx;
-                    if (idx != null) _playStreamNative(idx);
-                  },
-                ),
-              ],
-            ),
-          )
-        else if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
-          AspectRatio(
-            aspectRatio: _videoCtrl!.value.aspectRatio > 0
-                ? _videoCtrl!.value.aspectRatio
-                : 16 / 9,
-            child: Stack(
-              alignment: Alignment.bottomCenter,
-              children: [
-                VideoPlayer(_videoCtrl!),
-                _ControlsBar(
-                  controller: _videoCtrl!,
-                  isLive: _isLive,
-                  onFullscreen: _enterFullscreen,
-                ),
-              ],
-            ),
-          )
-        else
-          Container(
-            height: 220,
-            color: Colors.black,
-            child: Center(
-              child: _videoLoading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _error ?? '选择下方频道开始观看',
-                          style: TextStyle(
-                            color: _error != null
-                                ? Colors.orange[200]
-                                : Colors.white54,
-                            fontSize: 14,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        if (_error != null) ...[
-                          const SizedBox(height: 12),
-                          TextButton(
-                            onPressed: _retryCurrent,
-                            child: const Text('重试'),
-                          ),
-                        ],
-                      ],
-                    ),
-            ),
-          ),
-        if (_error != null && _videoCtrl == null)
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Text(_error!,
-                style: TextStyle(color: Colors.red[400], fontSize: 12)),
-          ),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: _loadStreams,
-            child: ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              itemCount: _streams.length,
-              itemBuilder: (_, i) {
-                final s = _streams[i] as Map;
-                final isActive = _activeIdx == i;
-                final enabled = s['enabled'] == 1 || s['enabled'] == true;
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: isActive
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.grey[200],
-                    child: Text('${i + 1}',
-                        style: TextStyle(
-                          color: isActive ? Colors.white : Colors.grey[600],
-                          fontWeight: FontWeight.bold,
-                        )),
-                  ),
-                  title: Text(s['name']?.toString() ?? '',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text(
-                    !enabled
-                        ? '已停用'
-                        : isActive
-                            ? '正在播放…'
-                            : '点击播放',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: isActive
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.grey),
-                  ),
-                  trailing: Icon(
-                    isActive ? Icons.graphic_eq : Icons.play_circle_outline,
-                    color: isActive
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.grey,
-                  ),
-                  selected: isActive,
-                  selectedTileColor:
-                      Theme.of(context).colorScheme.primary.withOpacity(0.05),
-                  onTap: enabled ? () => _playStream(i) : null,
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-
-/// 流畅引擎全屏：横屏 + 沉浸式 + WebView 播放
-class _FullscreenWebViewPage extends StatefulWidget {
-  final String proxyUrl;
-  final String title;
-  const _FullscreenWebViewPage({required this.proxyUrl, required this.title});
-
-  @override
-  State<_FullscreenWebViewPage> createState() => _FullscreenWebViewPageState();
-}
-
-class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
-  bool _showControls = true;
-
-  @override
-  void initState() {
-    super.initState();
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  }
-
-  @override
-  void dispose() {
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
-        overlays: SystemUiOverlay.values);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTap: () => setState(() => _showControls = !_showControls),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            HlsWebViewPlayer(proxyUrl: widget.proxyUrl),
-            if (_showControls)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black54, Colors.transparent],
-                    ),
-                  ),
-                  child: SafeArea(
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back,
-                              color: Colors.white, size: 28),
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                        Expanded(
-                          child: Text(
-                            widget.title,
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 16),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Container(
-                          margin: const EdgeInsets.only(right: 12),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text('LIVE',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
-                  ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isLandscape = constraints.maxWidth > constraints.maxHeight;
+        if (isLandscape) {
+          // 横屏：左右结构，视频 | 频道列表
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 3,
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: _useWebEngine && _webProxyUrl != null
+                      ? HlsWebViewPlayer(
+                          proxyUrl: _webProxyUrl!,
+                          onFallbackNative: () {
+                            if (!mounted) return;
+                            setState(() {
+                              _useWebEngine = false;
+                              _videoLoading = true;
+                              _webProxyUrl = null;
+                            });
+                            final idx = _activeIdx;
+                            if (idx != null) _playStreamNative(idx);
+                          },
+                        )
+                      : (_videoCtrl != null && _videoCtrl!.value.isInitialized)
+                          ? Stack(
+                              alignment: Alignment.bottomCenter,
+                              children: [
+                                VideoPlayer(_videoCtrl!),
+                                _ControlsBar(
+                                  controller: _videoCtrl!,
+                                  isLive: _isLive,
+                                  onFullscreen: _enterFullscreen,
+                                ),
+                              ],
+                            )
+                          : Center(
+                              child: _videoLoading
+                                  ? const CircularProgressIndicator(
+                                      color: Colors.white)
+                                  : Text(
+                                      _error ?? '选择右侧频道开始观看',
+                                      style: TextStyle(
+                                        color: _error != null
+                                            ? Colors.orange[200]
+                                            : Colors.white54,
+                                      ),
+                                    ),
+                            ),
                 ),
               ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                flex: 2,
+                child: _channelList(),
+              ),
+            ],
+          );
+        }
+        // 竖屏：保持原样（视频在上，列表在下）
+        return Column(
+          children: [
+            if (_useWebEngine && _webProxyUrl != null)
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: HlsWebViewPlayer(
+                    proxyUrl: _webProxyUrl!,
+                    onFallbackNative: () {
+                      if (!mounted) return;
+                      setState(() {
+                        _useWebEngine = false;
+                        _videoLoading = true;
+                        _webProxyUrl = null;
+                      });
+                      final idx = _activeIdx;
+                      if (idx != null) _playStreamNative(idx);
+                    },
+                  ),
+                ),
+              )
+            else if (_videoCtrl != null && _videoCtrl!.value.isInitialized)
+              AspectRatio(
+                aspectRatio: _videoCtrl!.value.aspectRatio > 0
+                    ? _videoCtrl!.value.aspectRatio
+                    : 16 / 9,
+                child: Stack(
+                  alignment: Alignment.bottomCenter,
+                  children: [
+                    VideoPlayer(_videoCtrl!),
+                    _ControlsBar(
+                      controller: _videoCtrl!,
+                      isLive: _isLive,
+                      onFullscreen: _enterFullscreen,
+                    ),
+                  ],
+                ),
+              )
+            else
+              Container(
+                height: 220,
+                color: Colors.black,
+                child: Center(
+                  child: _videoLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _error ?? '选择下方频道开始观看',
+                              style: TextStyle(
+                                color: _error != null
+                                    ? Colors.orange[200]
+                                    : Colors.white54,
+                                fontSize: 14,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            if (_error != null) ...[
+                              const SizedBox(height: 12),
+                              TextButton(
+                                onPressed: _retryCurrent,
+                                child: const Text('重试'),
+                              ),
+                            ],
+                          ],
+                        ),
+                ),
+              ),
+            if (_error != null && _videoCtrl == null && _webProxyUrl == null)
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(_error!,
+                    style: TextStyle(color: Colors.red[400], fontSize: 12)),
+              ),
+            Expanded(child: _channelList()),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 }

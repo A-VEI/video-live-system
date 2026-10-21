@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../config.dart';
+import '../services/endpoint_probe.dart';
 import 'home_page.dart';
 
 /// 登录页：对外不暴露「手机号登录」等提示，避免无关人员猜到用法
@@ -17,6 +18,28 @@ class _LoginPageState extends State<LoginPage> {
   bool _loading = false;
   bool _obscure = true;
   String? _error;
+  bool _probing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoPickLine();
+  }
+
+  /// 进登录页自动测速，静默切到更优线路（界面只显示线路名）
+  Future<void> _autoPickLine() async {
+    setState(() => _probing = true);
+    try {
+      final best = await EndpointProbe.bestForLive();
+      if (!mounted) return;
+      if (best != null && best.baseUrl != ApiClient.instance.baseUrl) {
+        await ApiClient.instance.setBaseUrl(best.baseUrl);
+      }
+      setState(() => _probing = false);
+    } catch (_) {
+      if (mounted) setState(() => _probing = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -112,11 +135,15 @@ class _LoginPageState extends State<LoginPage> {
             colors: [Color(0xFF1E3A8A), Color(0xFF0F172A)],
           ),
         ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 24),
-            child: Column(
-              children: [
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isLandscape = constraints.maxWidth > constraints.maxHeight;
+            final form = SingleChildScrollView(
+              padding: EdgeInsets.symmetric(
+                  horizontal: isLandscape ? 28 : 36, vertical: 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                 Container(
                   width: 72,
                   height: 72,
@@ -223,17 +250,71 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 28),
                 TextButton.icon(
                   onPressed: _showLineSheet,
-                  icon: Icon(Icons.cell_tower,
-                      size: 16, color: Colors.white.withOpacity(0.45)),
+                  icon: _probing
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white54),
+                        )
+                      : Icon(Icons.cell_tower,
+                          size: 16, color: Colors.white.withOpacity(0.45)),
                   label: Text(
-                    line,
+                    _probing ? '选线中…' : line,
                     style: TextStyle(
                         color: Colors.white.withOpacity(0.45), fontSize: 12),
                   ),
                 ),
-              ],
-            ),
-          ),
+                ],
+              ),
+            );
+
+            if (isLandscape) {
+              // 横屏：左品牌 | 右表单
+              return Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Container(
+                      color: Colors.white.withOpacity(0.04),
+                      child: const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.play_circle_outline,
+                                color: Colors.white, size: 64),
+                            SizedBox(height: 12),
+                            Text(
+                              'Live',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 3,
+                              ),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              '授权后可进入',
+                              style: TextStyle(
+                                  color: Colors.white54, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const VerticalDivider(width: 1),
+                  Expanded(
+                    flex: 3,
+                    child: Center(child: form),
+                  ),
+                ],
+              );
+            }
+            // 竖屏：保持原样
+            return Center(child: form);
+          },
         ),
       ),
     );
