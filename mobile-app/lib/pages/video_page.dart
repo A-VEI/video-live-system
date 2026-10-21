@@ -68,6 +68,43 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _playStreamNative(int idx) async {
+    setState(() {
+      _useWebEngine = false;
+      _videoLoading = true;
+      _error = null;
+      _webProxyUrl = null;
+    });
+    final stream = _streams[idx] as Map;
+    final rawProxy = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
+    final url = ApiClient.instance.absoluteUrl(rawProxy);
+    try {
+      final vc = VideoPlayerController.networkUrl(
+        Uri.parse(url),
+        formatHint: VideoFormat.hls,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+      );
+      await vc.initialize();
+      if (!mounted) {
+        vc.dispose();
+        return;
+      }
+      await vc.play();
+      setState(() {
+        _videoCtrl = vc;
+        _videoLoading = false;
+        _isLive = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _videoLoading = false;
+        _videoCtrl = null;
+        _error = describePlayError(e);
+      });
+    }
+  }
+
   Future<void> _playStream(int idx) async {
     if (_activeIdx == idx && (_videoCtrl?.value.isPlaying == true || _webProxyUrl != null)) return;
     setState(() {
