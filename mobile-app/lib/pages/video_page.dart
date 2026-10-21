@@ -3,9 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../api/api_client.dart';
 import '../config.dart';
-import '../services/endpoint_probe.dart';
 import 'hls_webview_player.dart';
-import '../config.dart';
 
 class VideoPage extends StatefulWidget {
   const VideoPage({super.key});
@@ -24,6 +22,7 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   String? _error;
   bool _isLive = true;
   bool _useWebEngine = true;
+  bool _failoverTried = false;
   String? _webProxyUrl;
 
   @override
