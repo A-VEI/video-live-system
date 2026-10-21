@@ -8,7 +8,10 @@ import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
 import '../config.dart';
 
-/// 运行时读取构建版本（pubspec.version → versionName），作为版本号单一来源。
+/// 当前构建号（CI: --dart-define=BUILD_ID=<run_number>）
+/// 与服务器 build.json 的 build_id 同一口径，否则更新判断会一直错
+const int kBuildId = int.fromEnvironment('BUILD_ID', defaultValue: 0);
+
 class AppVersion {
   static String? _cached;
 
@@ -24,52 +27,142 @@ class AppVersion {
   }
 }
 
+class UpdateCheckResult {
+  final bool hasUpdate;
+  final String version;
+  final String current;
+  final String updateUrl;
+  final String sha256;
+  final String notes;
+  final int serverBuild;
+  final int localBuild;
+  final String reason;
+
+  UpdateCheckResult({
+    required this.hasUpdate,
+    required this.version,
+    required this.current,
+    required this.updateUrl,
+    required this.sha256,
+    required this.notes,
+    required this.serverBuild,
+    required this.localBuild,
+    required this.reason,
+  });
+}
+
 class UpdateService {
-  static Future<Map<String, dynamic>?> checkUpdate() async {
+  /// 检查更新。返回结果对象，便于 UI 显示「为什么没有更新」。
+  static Future<UpdateCheckResult> check() async {
+    final current = await AppVersion.current();
     try {
-      final current = await AppVersion.current();
       final data = await ApiClient.instance.checkVersion();
-      if (data == null) return null;
-      final latestVersion = data['version'] as String? ?? current;
-      final updateUrl = data['update_url']?.toString() ?? '/api/app/download';
+      if (data == null) {
+        return UpdateCheckResult(
+          hasUpdate: false,
+          version: current,
+          current: current,
+          updateUrl: '',
+          sha256: '',
+          notes: '',
+          serverBuild: 0,
+          localBuild: kBuildId,
+          reason: '无法连接服务器',
+        );
+      }
 
-      // 1) 优先比 buildId（CI 自动编号，无需手改版本号）
-      final serverBuild = (data['build_id'] is int)
-          ? data['build_id'] as int
-          : int.tryParse(data['build_id']?.toString() ?? '') ?? 0;
+      final latest = (data['version'] as String?) ?? current;
+      final updateUrl = ApiClient.instance.absoluteUrl(
+        (data['update_url'] as String?) ?? '/api/app/download',
+      );
+      final sha = (data['sha256'] as String?) ?? '';
+      final notes = (data['notes'] as String?) ?? '';
+      final serverBuild = _asInt(data['build_id']);
       final localBuild = kBuildId;
+
+      // 规则 1：build_id 都有效时，只看 build_id（部署时必须与 CI 同号）
       if (serverBuild > 0 && localBuild > 0) {
-        if (serverBuild > localBuild) {
-          return {
-            'version': latestVersion,
-            'current': current,
-            'build_id': serverBuild,
-            'local_build_id': localBuild,
-            'update_url': ApiClient.instance.absoluteUrl(updateUrl),
-            'notes': data['notes'] ?? '',
-            'sha256': data['sha256'] ?? '',
-          };
-        }
-        return null; // 同 build 或已更新
+        final up = serverBuild > localBuild;
+        return UpdateCheckResult(
+          hasUpdate: up,
+          version: latest,
+          current: current,
+          updateUrl: updateUrl,
+          sha256: sha,
+          notes: notes,
+          serverBuild: serverBuild,
+          localBuild: localBuild,
+          reason: up
+              ? '有新构建 $serverBuild > $localBuild'
+              : '已是最新构建 $localBuild',
+        );
       }
 
-      // 2) 回退：语义化版本号
-      if (_compareVersion(latestVersion, current) > 0) {
-        return {
-          'version': latestVersion,
-          'current': current,
-          'update_url': ApiClient.instance.absoluteUrl(updateUrl),
-          'notes': data['notes'] ?? '',
-          'sha256': data['sha256'] ?? '',
-        };
+      // 规则 2：一侧 build_id 缺失 → 用版本号
+      final cmp = _compareVersion(latest, current);
+      if (cmp > 0) {
+        return UpdateCheckResult(
+          hasUpdate: true,
+          version: latest,
+          current: current,
+          updateUrl: updateUrl,
+          sha256: sha,
+          notes: notes,
+          serverBuild: serverBuild,
+          localBuild: localBuild,
+          reason: '版本 $latest > $current',
+        );
       }
+
+      return UpdateCheckResult(
+        hasUpdate: false,
+        version: latest,
+        current: current,
+        updateUrl: updateUrl,
+        sha256: sha,
+        notes: notes,
+        serverBuild: serverBuild,
+        localBuild: localBuild,
+        reason: serverBuild == 0 && localBuild == 0
+            ? '版本相同 $current'
+            : '无更新（server=$serverBuild local=$localBuild ver=$latest）',
+      );
     } catch (e) {
-      debugPrint('checkUpdate: $e');
+      return UpdateCheckResult(
+        hasUpdate: false,
+        version: current,
+        current: current,
+        updateUrl: '',
+        sha256: '',
+        notes: '',
+        serverBuild: 0,
+        localBuild: kBuildId,
+        reason: '检查失败: $e',
+      );
     }
-    return null;
   }
 
-static int _compareVersion(String v1, String v2) {
+  /// 兼容旧调用：有更新返回 Map，否则 null
+  static Future<Map<String, dynamic>?> checkUpdate() async {
+    final r = await check();
+    if (!r.hasUpdate) return null;
+    return {
+      'version': r.version,
+      'current': r.current,
+      'update_url': r.updateUrl,
+      'sha256': r.sha256,
+      'notes': r.notes,
+      'build_id': r.serverBuild,
+      'local_build_id': r.localBuild,
+    };
+  }
+
+  static int _asInt(dynamic v) {
+    if (v is int) return v;
+    return int.tryParse(v?.toString() ?? '') ?? 0;
+  }
+
+  static int _compareVersion(String v1, String v2) {
     final p1 = v1.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     final p2 = v2.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     for (var i = 0; i < 3; i++) {
@@ -99,14 +192,13 @@ static int _compareVersion(String v1, String v2) {
         if (total > 0) onProgress(received / total);
       },
     );
-    // P3: APK 完整性校验，防止中间人换包
     if (expectSha256 != null && expectSha256.isNotEmpty) {
       final digest = await _fileSha256(savePath);
       if (digest.toLowerCase() != expectSha256.toLowerCase()) {
         try {
           File(savePath).deleteSync();
         } catch (_) {}
-        throw Exception('APK 校验失败，已丢弃安装包');
+        throw Exception('完整性校验失败');
       }
     }
     final result = await OpenFilex.open(savePath);
@@ -162,13 +254,19 @@ class _UpdateDialogState extends State<_UpdateDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final ver = widget.update['version']?.toString() ?? '';
+    final cur = widget.update['current']?.toString() ?? '';
+    final sb = widget.update['build_id'];
+    final lb = widget.update['local_build_id'];
     return AlertDialog(
-      title: Text('发现新版本 ${widget.update['version']}'),
+      title: Text('发现新版本 $ver'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('当前版本: ${widget.update['current']}'),
+          Text('当前: $cur'),
+          if (sb != null && lb != null)
+            Text('构建: $lb → $sb', style: const TextStyle(fontSize: 12)),
           const SizedBox(height: 8),
           if (widget.update['notes']?.toString().isNotEmpty == true)
             Text(widget.update['notes'].toString(),

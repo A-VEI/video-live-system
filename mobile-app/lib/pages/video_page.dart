@@ -17,6 +17,7 @@ class VideoPage extends StatefulWidget {
 class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   List<dynamic> _streams = [];
   int? _activeIdx;
+  int _playGen = 0; // 播放代数，快速连点防串台
   VideoPlayerController? _videoCtrl;
   bool _loading = true;
   bool _videoLoading = false;
@@ -69,6 +70,7 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   }
 
   Future<void> _playStreamNative(int idx) async {
+    final gen = ++_playGen;
     setState(() {
       _useWebEngine = false;
       _videoLoading = true;
@@ -85,18 +87,22 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
       );
       await vc.initialize();
-      if (!mounted) {
+      if (!mounted || gen != _playGen) {
         vc.dispose();
         return;
       }
       await vc.play();
+      if (!mounted || gen != _playGen) {
+        vc.dispose();
+        return;
+      }
       setState(() {
         _videoCtrl = vc;
         _videoLoading = false;
         _isLive = true;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _playGen) return;
       setState(() {
         _videoLoading = false;
         _videoCtrl = null;
@@ -106,7 +112,11 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   }
 
   Future<void> _playStream(int idx) async {
-    if (_activeIdx == idx && (_videoCtrl?.value.isPlaying == true || _webProxyUrl != null)) return;
+    final gen = ++_playGen;
+    if (_activeIdx == idx &&
+        (_videoCtrl?.value.isPlaying == true || _webProxyUrl != null)) {
+      return;
+    }
     setState(() {
       _activeIdx = idx;
       _videoLoading = true;
@@ -117,6 +127,7 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
     if (_useWebEngine) {
       final stream = _streams[idx] as Map;
       final raw = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
+      if (!mounted || gen != _playGen) return;
       setState(() {
         _webProxyUrl = ApiClient.instance.absoluteUrl(raw);
         _videoLoading = false;
@@ -124,76 +135,7 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
       });
       return;
     }
-    final old = _videoCtrl;
-    _videoCtrl = null;
-    // 先释放旧控制器，避免闪烁时并发初始化
-    old?.dispose();
-
-    final stream = _streams[idx] as Map;
-    final rawProxy = (stream['proxy_url'] ?? stream['url'] ?? '') as String;
-    final url = ApiClient.instance.absoluteUrl(rawProxy);
-
-    try {
-      final vc = VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        // 明确按 HLS 处理，交给 ExoPlayer 直播模式
-        formatHint: VideoFormat.hls,
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
-      );
-      await vc.initialize();
-      if (!mounted) {
-        vc.dispose();
-        return;
-      }
-
-      // 本系统全是直播：禁止 seekTo(duration-N)。
-      // HLS 窗口 duration 会被误判成点播，seek 会在 2s 分片边界反复卡顿。
-      await vc.play();
-
-      setState(() {
-        _videoCtrl = vc;
-        _videoLoading = false;
-        _isLive = true;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      // 播放失败：尝试自动切换到另一条出口（只切换一次）
-      final switched = await _trySwitchEndpoint();
-      if (switched) {
-        final idx2 = _activeIdx;
-        if (idx2 != null) {
-          await _playStream(idx2);
-          return;
-        }
-      }
-      setState(() {
-        _videoLoading = false;
-        _videoCtrl = null;
-        _error = describePlayError(e);
-      });
-    }
-  }
-
-  bool _failoverTried = false;
-
-  Future<bool> _trySwitchEndpoint() async {
-    if (_failoverTried) return false;
-    _failoverTried = true;
-    try {
-      final best = await EndpointProbe.bestForLive();
-      if (best == null) return false;
-      final cur = ApiClient.instance.baseUrl;
-      if (best.baseUrl == cur) return false;
-      await ApiClient.instance.setBaseUrl(best.baseUrl);
-      await ApiClient.instance.getStreams();
-      if (!mounted) return true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已自动切换到 ${best.label}')),
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
+    await _playStreamNative(idx);
   }
 
   Future<void> _retryCurrent() async {
@@ -210,6 +152,18 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   }
 
   void _enterFullscreen() {
+    if (_useWebEngine && _webProxyUrl != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => _FullscreenWebViewPage(
+            proxyUrl: _webProxyUrl!,
+            title: _streams[_activeIdx ?? 0]['name']?.toString() ?? '',
+          ),
+        ),
+      );
+      return;
+    }
     final ctrl = _videoCtrl;
     if (ctrl == null) return;
     Navigator.of(context).push(
@@ -356,6 +310,103 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
           ),
         ),
       ],
+    );
+  }
+}
+
+
+/// 流畅引擎全屏：横屏 + 沉浸式 + WebView 播放
+class _FullscreenWebViewPage extends StatefulWidget {
+  final String proxyUrl;
+  final String title;
+  const _FullscreenWebViewPage({required this.proxyUrl, required this.title});
+
+  @override
+  State<_FullscreenWebViewPage> createState() => _FullscreenWebViewPageState();
+}
+
+class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
+  bool _showControls = true;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
+        overlays: SystemUiOverlay.values);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTap: () => setState(() => _showControls = !_showControls),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            HlsWebViewPlayer(proxyUrl: widget.proxyUrl),
+            if (_showControls)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black54, Colors.transparent],
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white, size: 28),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 16),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('LIVE',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

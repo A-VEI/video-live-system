@@ -216,8 +216,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _checkUpdateSilently() async {
     try {
-      final u = await UpdateService.checkUpdate();
-      if (mounted) setState(() => _hasUpdate = u != null);
+      final r = await UpdateService.check();
+      if (mounted) setState(() => _hasUpdate = r.hasUpdate);
     } catch (_) {}
   }
 
@@ -228,18 +228,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       barrierDismissible: false,
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
-    final update = await UpdateService.checkUpdate();
+    final r = await UpdateService.check();
     if (!mounted) return;
     Navigator.of(context).pop();
-    if (update == null) {
-      setState(() => _hasUpdate = false);
+    setState(() => _hasUpdate = r.hasUpdate);
+    if (!r.hasUpdate) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已是最新版本')),
+        SnackBar(content: Text('已是最新 · ${r.reason}')),
       );
       return;
     }
-    setState(() => _hasUpdate = true);
-    showUpdateDialog(context, update);
+    showUpdateDialog(context, {
+      'version': r.version,
+      'current': r.current,
+      'update_url': r.updateUrl,
+      'sha256': r.sha256,
+      'notes': r.notes,
+      'build_id': r.serverBuild,
+      'local_build_id': r.localBuild,
+    });
   }
 
   void _openSettings() {
@@ -352,7 +359,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             ListTile(
               leading: const Icon(Icons.lock_reset),
-              title: const Text('修改口令'),
+              title: const Text('修改密钥'),
               onTap: () {
                 Navigator.pop(ctx);
                 showChangePasswordDialog(context);

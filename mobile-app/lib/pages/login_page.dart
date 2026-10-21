@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../config.dart';
-
-import 'home_page.dart';
 import '../services/endpoint_probe.dart';
+import 'home_page.dart';
 
+/// 登录页：对外不暴露「手机号登录」等提示，避免无关人员猜到用法
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -13,64 +13,29 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _phoneCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
-  final _serverCtrl = TextEditingController(text: ApiClient.instance.baseUrl);
+  final _userCtrl = TextEditingController();
+  final _secretCtrl = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
   String? _error;
 
-  List<EndpointHealth> _health = [];
-  bool _probing = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _serverCtrl.text = ApiClient.instance.baseUrl;
-    _autoProbe();
-  }
-
-  Future<void> _autoProbe() async {
-    setState(() => _probing = true);
-    try {
-      final list = await EndpointProbe.probeAll();
-      if (!mounted) return;
-      setState(() {
-        _health = list;
-        _probing = false;
-      });
-      // 自动选优：优先能跟上 2s 分片的出口
-      final best = await EndpointProbe.bestForLive();
-      if (best != null && mounted) {
-        setState(() => _serverCtrl.text = best.baseUrl);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _probing = false);
-    }
-  }
-
   @override
   void dispose() {
-    _phoneCtrl.dispose();
-    _passwordCtrl.dispose();
-    _serverCtrl.dispose();
+    _userCtrl.dispose();
+    _secretCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _login() async {
-    final phone = _phoneCtrl.text.trim();
-    final password = _passwordCtrl.text;
-    if (phone.length != 11) {
-      setState(() => _error = '请输入11位手机号');
+  Future<void> _submit() async {
+    final user = _userCtrl.text.trim();
+    final secret = _secretCtrl.text;
+    if (user.isEmpty || secret.isEmpty) {
+      setState(() => _error = '请填写凭据');
       return;
     }
-    if (password.isEmpty) {
-      setState(() => _error = '请输入口令');
-      return;
-    }
-    final server = _serverCtrl.text.trim();
-    if (server.isEmpty || !server.startsWith('http://')) {
-      setState(() => _error = '请选择线路');
+    // 长度校验不提示「11 位手机号」
+    if (user.length < 6 || user.length > 32) {
+      setState(() => _error = '验证失败');
       return;
     }
     setState(() {
@@ -78,8 +43,7 @@ class _LoginPageState extends State<LoginPage> {
       _error = null;
     });
     try {
-      await ApiClient.instance.setBaseUrl(server);
-      final data = await ApiClient.instance.login(phone, password);
+      final data = await ApiClient.instance.login(user, secret);
       if (data['ok'] == true && mounted) {
         if (data['must_change_password'] == true) {
           final changed = await showChangePasswordDialog(context, force: true);
@@ -95,57 +59,42 @@ class _LoginPageState extends State<LoginPage> {
           );
         }
       } else {
-        setState(() => _error = data['msg']?.toString() ?? '登录失败');
+        setState(() => _error = '验证失败');
       }
     } catch (e) {
-      setState(() => _error = e is ApiException ? e.message : '登录失败: $e');
+      // 统一失败文案，不区分「未注册 / 口令错」
+      setState(() => _error = '验证失败');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _showServerSheet() {
+  void _showLineSheet() {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 24,
-          right: 24,
-          top: 24,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-        ),
+      builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('选择线路',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('双出口自动选优，可手动切换',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _serverCtrl,
-              keyboardType: TextInputType.url,
-              decoration: InputDecoration(
-                labelText: '线路',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                prefixIcon: const Icon(Icons.dns),
-              ),
+            const ListTile(
+              title: Text('接入线路', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
+            for (final e in kServerEndpoints)
+              ListTile(
+                leading: Icon(
+                  matchEndpoint(ApiClient.instance.baseUrl)?.id == e.id
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                ),
+                title: Text(e.label),
+                onTap: () async {
                   Navigator.pop(ctx);
-                  setState(() {});
+                  await ApiClient.instance.setBaseUrl(e.baseUrl);
+                  await ApiClient.instance.clearAuth();
+                  if (mounted) setState(() {});
                 },
-                child: const Text('保存'),
               ),
-            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -154,151 +103,137 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final line = matchEndpoint(ApiClient.instance.baseUrl)?.label ?? '默认线路';
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child:
-                    const Icon(Icons.play_arrow, color: Colors.white, size: 32),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                '视频直播系统',
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text('手机号 + 口令登录',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 14)),
-              const SizedBox(height: 32),
-              TextField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                maxLength: 11,
-                decoration: InputDecoration(
-                  labelText: '手机号',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.phone),
-                  counterText: '',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passwordCtrl,
-                obscureText: _obscure,
-                decoration: InputDecoration(
-                  labelText: '口令',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                        _obscure ? Icons.visibility : Icons.visibility_off),
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                  ),
-                ),
-                onSubmitted: (_) => _login(),
-              ),
-              const SizedBox(height: 12),
-              if (_probing)
-                const LinearProgressIndicator(minHeight: 2)
-              else if (_health.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      for (final h in _health)
-                        Chip(
-                          avatar: Icon(
-                            h.ok
-                                ? (h.keepsUp
-                                    ? Icons.signal_cellular_alt
-                                    : Icons.speed)
-                                : Icons.wifi_off,
-                            size: 16,
-                            color: h.ok
-                                ? (h.keepsUp ? Colors.green : Colors.orange)
-                                : Colors.red,
-                          ),
-                          label: Text(
-                            h.label,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              _IspSelector(
-                currentUrl: _serverCtrl.text,
-                onPick: (ep) {
-                  setState(() {
-                    _serverCtrl.text = ep.baseUrl;
-                  });
-                },
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: FilledButton(
-                  onPressed: _loading ? null : _login,
-                  child: _loading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Text('登录', style: TextStyle(fontSize: 16)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  TextButton.icon(
-                    onPressed: _autoProbe,
-                    icon: const Icon(Icons.speed, size: 18),
-                    label: const Text('重新测速', style: TextStyle(fontSize: 12)),
-                  ),
-                  TextButton.icon(
-                    onPressed: _showServerSheet,
-                    icon: const Icon(Icons.settings_ethernet, size: 18),
-                    label: Text(
-                      '线路: ${matchEndpoint(_serverCtrl.text)?.label ?? '自定义'}',
-                      style: const TextStyle(fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 16),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF1E3A8A), Color(0xFF0F172A)],
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 24),
+            child: Column(
+              children: [
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  width: 72,
+                  height: 72,
                   decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.white.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(_error!,
-                      style: TextStyle(color: Colors.red[700], fontSize: 13)),
+                  child: const Icon(Icons.play_circle_outline,
+                      color: Colors.white, size: 40),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Live',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '授权后可进入',
+                  style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13),
+                ),
+                const SizedBox(height: 36),
+                TextField(
+                  controller: _userCtrl,
+                  keyboardType: TextInputType.text,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: '标识',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
+                    prefixIcon:
+                        Icon(Icons.perm_identity, color: Colors.white.withOpacity(0.5)),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.08),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _secretCtrl,
+                  obscureText: _obscure,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: '密钥',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
+                    prefixIcon:
+                        Icon(Icons.vpn_key_outlined, color: Colors.white.withOpacity(0.5)),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscure ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.white.withOpacity(0.45),
+                        size: 20,
+                      ),
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.08),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  onSubmitted: (_) => _submit(),
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _loading ? null : _submit,
+                    child: _loading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Text('进入', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 14),
+                  Text(_error!,
+                      style: TextStyle(
+                          color: Colors.red.shade300, fontSize: 13)),
+                ],
+                const SizedBox(height: 28),
+                TextButton.icon(
+                  onPressed: _showLineSheet,
+                  icon: Icon(Icons.cell_tower,
+                      size: 16, color: Colors.white.withOpacity(0.45)),
+                  label: Text(
+                    line,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.45), fontSize: 12),
+                  ),
                 ),
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -306,8 +241,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
-/// 修改口令对话框。force=true 时不允许取消。
-/// 返回 true 表示已成功改密。
+/// 修改凭据对话框
 Future<bool?> showChangePasswordDialog(BuildContext context,
     {bool force = false}) async {
   final oldCtrl = TextEditingController();
@@ -322,29 +256,29 @@ Future<bool?> showChangePasswordDialog(BuildContext context,
     barrierDismissible: !force,
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setLocal) => AlertDialog(
-        title: Text(force ? '请修改初始口令' : '修改口令'),
+        title: Text(force ? '请更新访问密钥' : '修改密钥'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (force)
               const Text(
-                '为了安全，首次登录必须修改口令。',
+                '首次进入需要设置新的访问密钥。',
                 style: TextStyle(fontSize: 13, color: Colors.grey),
               ),
             TextField(
               controller: oldCtrl,
               obscureText: obscure,
-              decoration: const InputDecoration(labelText: '原口令'),
+              decoration: const InputDecoration(labelText: '当前密钥'),
             ),
             TextField(
               controller: newCtrl,
               obscureText: obscure,
-              decoration: const InputDecoration(labelText: '新口令（至少8位）'),
+              decoration: const InputDecoration(labelText: '新密钥（至少8位）'),
             ),
             TextField(
               controller: confirmCtrl,
               obscureText: obscure,
-              decoration: const InputDecoration(labelText: '确认新口令'),
+              decoration: const InputDecoration(labelText: '确认新密钥'),
             ),
             if (error != null)
               Padding(
@@ -395,39 +329,4 @@ Future<bool?> showChangePasswordDialog(BuildContext context,
     ),
   );
   return result;
-}
-
-/// 出口选择：移动 / 电信
-class _IspSelector extends StatelessWidget {
-  final String currentUrl;
-  final ValueChanged<ServerEndpoint> onPick;
-  const _IspSelector({required this.currentUrl, required this.onPick});
-
-  @override
-  Widget build(BuildContext context) {
-    final matched = matchEndpoint(currentUrl);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('网络出口',
-            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          children: [
-            for (final ep in kServerEndpoints)
-              ChoiceChip(
-                label: Text(ep.label),
-                avatar: Icon(
-                  matched?.id == ep.id ? Icons.check_circle : Icons.router,
-                  size: 18,
-                ),
-                selected: matched?.id == ep.id,
-                onSelected: (_) => onPick(ep),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
 }

@@ -52,11 +52,27 @@ jobs:
           echo "$V" > ../VERSION
           echo "App version=$V" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Write build.json
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          SHA=$(sha256sum "$APK" | awk '{print $1}')
+          SIZE=$(stat -c%s "$APK")
+          V=$(grep -E '^version:' pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
+          printf '{"build_id": %s, "sha256": "%s", "size": %s, "version": "%s"}\n' \
+            "${{ github.run_number }}" "$SHA" "$SIZE" "$V" > build.json
+          echo "build.json:"; cat build.json
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: video-live-apk
           path: mobile-app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload build.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-meta
+          path: mobile-app/build.json
 
       - name: Upload VERSION
         uses: actions/upload-artifact@v4
