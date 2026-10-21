@@ -57,6 +57,12 @@ function watchStall(video) {
   if (stallTimer) clearInterval(stallTimer);
   stallCount = 0;
   lastBuf = 0;
+  // 每 10 分钟轻量重载，预防长时间播放卡死
+  if (window.__reloadTimer) clearInterval(window.__reloadTimer);
+  window.__reloadTimer = setInterval(function () {
+    if (document.hidden) return;
+    boot(true);
+  }, 10 * 60 * 1000);
   stallTimer = setInterval(function () {
     var b = 0;
     try {

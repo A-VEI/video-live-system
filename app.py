@@ -342,9 +342,12 @@ def download_apk():
     """口令验证后下载 APK（口令存 settings，可轮换）"""
     code = request.args.get('code', '')
     expected = _get_setting('download_code', '')
+    # 扫码进来的链接不含口令：显示口令页，而不是直接 403
+    if not code:
+        return render_template('apk_gate.html', error=None)
     if not check_download_code(code, expected):
         _audit('-', 'apk_download_denied', 'bad code')
-        return '口令错误', 403
+        return render_template('apk_gate.html', error='口令错误'), 403
     apk_path = os.path.join(app.root_path, 'static', 'app', 'video-live.apk')
     if not os.path.exists(apk_path):
         return 'APK 文件不存在', 404

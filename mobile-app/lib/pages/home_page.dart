@@ -299,6 +299,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               const Text('扫码安装客户端',
                   style: TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text('下载口令：8119',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E3A8A))),
+              ),
+              const SizedBox(height: 8),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('关闭'),
