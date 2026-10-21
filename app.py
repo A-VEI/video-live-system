@@ -77,7 +77,7 @@ def record_attempt(phone):
 # ── JWT (标准库实现, 无第三方依赖) ─────────────────────────
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
-def jwt_encode(payload: dict, secret, expires_in: int = 43200) -> str:
+def jwt_encode(payload: dict, secret, expires_in: int = 14400) -> str:
     secret_bytes = secret if isinstance(secret, bytes) else secret.encode()
     header = _b64url(json_mod.dumps({"alg":"HS256","typ":"JWT"}).encode())
     payload = {**payload, "exp": int(time.time()) + expires_in}
@@ -281,36 +281,62 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'phone' not in session:
-            return redirect(url_for('login'))
+            return redirect('/account/login')
         return f(*args, **kwargs)
     return decorated
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'phone' not in session:
-            return redirect(url_for('login'))
+            return redirect('/account/login')
         if session.get('role') != 'admin':
-            return redirect(url_for('video_page'))
+            return redirect('/app')
         return f(*args, **kwargs)
     return decorated
+def _ensure_csrf():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = base64.urlsafe_b64encode(os.urandom(16)).decode()
+
+
 def csrf_protect(f):
-    """API 接口要求 X-Requested-With 头 (简单 CSRF 防护)"""
+    """Web 变更需 X-Requested-With + X-CSRF-Token 与 Session 一致。"""
     @wraps(f)
     def decorated(*args, **kwargs):
         if request.method in ('POST', 'PUT', 'DELETE'):
             if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
                 return jsonify(ok=False, msg='forbidden'), 403
+            # JWT（App）不依赖 session CSRF
+            auth = request.headers.get('Authorization', '')
+            if not auth.startswith('Bearer '):
+                token = session.get('csrf_token') or ''
+                got = request.headers.get('X-CSRF-Token', '')
+                if not token or not hmac.compare_digest(token, got):
+                    return jsonify(ok=False, msg='csrf'), 403
         return f(*args, **kwargs)
     return decorated
 # ── 页面 ──────────────────────────────────────────────────────
 # ── 首页: App 下载页 ──
 @app.route('/')
 def download_page():
-    # 如果已登录且 web 视频开启, 直接跳视频页
+    # 入口：左扫码下载 + 右登录（已登录进直播）
     if 'phone' in session:
-        if _get_setting('web_video_enabled') == '1':
-            return redirect(url_for('video_page'))
-    return render_template('download.html')
+        return redirect('/app')
+    code = _get_setting('download_code', '')
+    return render_template('landing.html', error=None, download_code=code)
+
+
+@app.route('/qr.png')
+def qr_png():
+    """App 下载二维码"""
+    try:
+        from qrutil import make_qr_png
+    except Exception:
+        return Response('qr unavailable', status=503)
+    # 二维码不含口令；扫码后仍需输入口令
+    host = request.host.split(':')[0]
+    url = 'http://%s:8119/download/apk' % host
+    return Response(make_qr_png(url), content_type='image/png',
+                    headers={'Cache-Control': 'public, max-age=3600'})
 @app.route('/download/apk')
 def download_apk():
     """口令验证后下载 APK（口令存 settings，可轮换）"""
@@ -324,7 +350,8 @@ def download_apk():
         return 'APK 文件不存在', 404
     _audit('-', 'apk_download', request.args.get('code', '')[:0])
     return send_file(apk_path, as_attachment=True, download_name='video-live.apk')
-@app.route('/video')
+@app.route('/app')
+@app.route('/video')  # 兼容旧书签
 @login_required
 def video_page():
     """视频页 (受 web_video_enabled 控制)"""
@@ -337,7 +364,21 @@ def video_page():
         d = dict(r)
         d['proxy_url'] = _build_signed_proxy_url(d['url'])
         streams.append(d)
+    import json as _j
+    users_rows = []
+    if session.get('role') == 'admin':
+        users_rows = [dict(r) for r in db.execute('SELECT * FROM users ORDER BY id').fetchall()]
+    streams_json = _j.dumps([{
+        'id': s.get('id'), 'name': s.get('name'), 'url': s.get('url'),
+        'sort': s.get('sort'), 'enabled': s.get('enabled'),
+        'proxy_url': s.get('proxy_url')
+    } for s in streams])
+    _ensure_csrf()
     return render_template('dashboard.html', streams=streams,
+                           streams_json=streams_json,
+                           users_json=_j.dumps(users_rows),
+                           csrf_token=session.get('csrf_token', ''),
+                           web_video=int(_get_setting('web_video_enabled', '1')),
                            name=session.get('name'), role=session.get('role'))
 # ── 设置 API ──
 @app.route('/api/settings')
@@ -355,24 +396,28 @@ def api_toggle_web_video():
     db.execute("INSERT OR REPLACE INTO settings (key,value) VALUES ('web_video_enabled',?)", (val,))
     db.commit()
     return jsonify(ok=True, web_video_enabled=int(val))
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/account/login', methods=['GET', 'POST'])
+@app.route('/login', methods=['GET', 'POST'])  # 兼容
 def login():
     if request.method == 'POST':
         phone = (request.form.get('phone') or '').strip()
         password = request.form.get('password') or ''
         if not phone or not password:
-            return render_template('login.html', error='请输入手机号和口令')
+            return render_template('landing.html', error='请填写凭据',
+                                   download_code=_get_setting('download_code', ''))
         # 频率限制
         if is_rate_limited(phone):
             _audit(phone, 'login_ratelimited')
-            return render_template('login.html', error='尝试次数过多，请5分钟后再试')
+            return render_template('landing.html', error='尝试次数过多，请5分钟后再试',
+                                   download_code=_get_setting('download_code', ''))
         record_attempt(phone)
         db = get_db()
         user = db.execute('SELECT * FROM users WHERE phone=? AND enabled=1',
                           (phone,)).fetchone()
         if not user or not verify_password(password, user['password_hash']):
             _audit(phone, 'login_failed', request.remote_addr)
-            return render_template('login.html', error='手机号或口令错误')
+            return render_template('landing.html', error='验证失败',
+                                   download_code=_get_setting('download_code', ''))
         # 登录成功, 清除该手机号的失败记录
         _login_attempts.pop(phone, None)
         session.permanent = True
@@ -383,22 +428,26 @@ def login():
                    (phone, request.remote_addr))
         db.commit()
         _audit(phone, 'login_ok')
+        _ensure_csrf()
         if user['must_change_password']:
-            return redirect('/change-password')
-        return redirect(url_for('video_page'))
-    return render_template('login.html', error=None)
-@app.route('/logout')
+            return redirect('/account/password')
+        return redirect('/app')
+    return redirect('/')
+@app.route('/account/logout')
+@app.route('/logout')  # 兼容
 def logout():
     session.clear()
-    return redirect(url_for('login'))
+    return redirect('/account/login')
 # (dashboard 已改为 video_page, 见上方)
-@app.route('/users')
+@app.route('/admin/users')
+@app.route('/users')  # 兼容
 @admin_required
 def users_page():
     db = get_db()
     users = db.execute('SELECT * FROM users ORDER BY id').fetchall()
     return render_template('users.html', users=users, name=session.get('name'))
-@app.route('/devices')
+@app.route('/admin/devices')
+@app.route('/devices')  # 兼容
 @admin_required
 def devices_page():
     db = get_db()
@@ -407,7 +456,7 @@ def devices_page():
 # ── HLS 代理（方案 B：签名 URL，播放器无需带 Header）─────────
 def _proxy_path_host(stream_path: str) -> str:
     return (stream_path.split('/', 1) or [''])[0]
-def _build_signed_proxy_url(stream_url: str, ttl: int = 7200) -> str:
+def _build_signed_proxy_url(stream_url: str, ttl: int = 86400) -> str:
     return signed_proxy_path(app.secret_key, stream_url, ttl=ttl)
 def _proxy_allowlist():
     """返回 (hosts set, path prefixes list)。"""
@@ -679,38 +728,45 @@ def _security_headers(resp):
     apply_security_headers(resp.headers)
     if request.path.startswith('/api/') or request.path.startswith('/proxy/'):
         resp.headers.setdefault('Cache-Control', 'no-store')
-    elif request.path in ('/', '/login', '/video', '/users', '/devices',
-                          '/change-password'):
+    elif request.path.startswith(('/', '/app', '/admin/', '/account/')) and not request.path.startswith('/api/'):
         resp.headers['Content-Security-Policy'] = page_csp()
     return resp
 # ── 改密（Web）───────────────────────────────────────────────
-@app.route('/change-password', methods=['GET', 'POST'])
+@app.route('/account/password', methods=['GET', 'POST'])
+@app.route('/change-password', methods=['GET', 'POST'])  # 兼容
 @login_required
 def change_password_page():
     phone = session.get('phone')
     if request.method == 'POST':
+        got = request.form.get('csrf_token') or ''
+        if not session.get('csrf_token') or not hmac.compare_digest(str(session['csrf_token']), got):
+            return render_template('change_password.html', error='页面已过期，请刷新',
+                                   csrf_token=session.get('csrf_token', ''))
         old_pw = request.form.get('old_password') or ''
         new_pw = request.form.get('new_password') or ''
         confirm = request.form.get('confirm_password') or ''
         if new_pw != confirm:
             return render_template('change_password.html',
+                                   csrf_token=session.get('csrf_token', ''),
                                    error='两次输入的新口令不一致')
         db = get_db()
         user = db.execute('SELECT * FROM users WHERE phone=?',
                           (phone,)).fetchone()
         if not user or not verify_password(old_pw, user['password_hash']):
             _audit(phone, 'web_change_pw_bad_old')
-            return render_template('change_password.html', error='原口令错误')
+            return render_template('change_password.html', csrf_token=session.get('csrf_token', ''), error='原口令错误')
         err = password_policy_error(new_pw, phone)
         if err:
-            return render_template('change_password.html', error=err)
+            return render_template('change_password.html', csrf_token=session.get('csrf_token', ''), error=err)
         db.execute(
             'UPDATE users SET password_hash=?, must_change_password=0 WHERE phone=?',
             (hash_password(new_pw), phone))
         db.commit()
         _audit(phone, 'web_change_password')
-        return redirect(url_for('video_page'))
+        return redirect('/app')
+    _ensure_csrf()
     return render_template('change_password.html', error=None,
+                           csrf_token=session.get('csrf_token', ''),
                            must=True if _user_must_change(phone) else False)
 def _user_must_change(phone):
     try:

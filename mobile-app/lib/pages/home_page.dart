@@ -267,6 +267,49 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return kBuildId > 0 ? '#$kBuildId' : '—';
   }
 
+  /// 分享：展示下载二维码
+  void _showShareQr() {
+    final qrUrl = '${ApiClient.instance.baseUrl}/qr.png';
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('分享下载',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  qrUrl,
+                  width: 220,
+                  height: 220,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const SizedBox(
+                    width: 220,
+                    height: 220,
+                    child: Center(child: Text('二维码加载失败')),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('扫码安装客户端',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 右侧抽屉：设置
   Widget _buildSettingsDrawer() {
     return Drawer(
@@ -327,6 +370,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               leading: const Icon(Icons.info_outline),
               title: const Text('构建信息'),
               subtitle: Text(_buildLabel()),
+            ),
+            ListTile(
+              leading: const Icon(Icons.qr_code_2),
+              title: const Text('分享下载'),
+              onTap: () {
+                Navigator.pop(context);
+                _showShareQr();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.system_update_alt),
@@ -521,6 +572,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: '分享',
+            icon: const Icon(Icons.qr_code_2),
+            onPressed: _showShareQr,
+          ),
           Stack(
             children: [
               IconButton(

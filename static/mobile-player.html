@@ -8,7 +8,7 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;overflow:hidden;position:fixed;inset:0}
 #v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:14px/1.5 sans-serif;opacity:.85;padding:16px;text-align:center;pointer-events:none;z-index:2}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:14px/1.5 sans-serif;padding:16px;text-align:center;pointer-events:none;z-index:2}
 #msg.hide{display:none}
 </style>
 </head>
@@ -17,34 +17,24 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;position:fixed;
 <div id="msg" class="hide"></div>
 <script>
 var msgTimer = null;
+var hls = null;
+var stallTimer = null;
+var lastBuf = 0;
+var stallCount = 0;
 
 function say(t, autoHideMs) {
   var el = document.getElementById('msg');
   if (msgTimer) { clearTimeout(msgTimer); msgTimer = null; }
   if (!t) {
-    el.className = 'hide';
-    el.textContent = '';
-    try {
-      if (window.Flutter && window.Flutter.postMessage) {
-        window.Flutter.postMessage('status:playing');
-      }
-    } catch (e) {}
+    el.className = 'hide'; el.textContent = '';
+    try { if (window.Flutter && window.Flutter.postMessage) window.Flutter.postMessage('status:playing'); } catch (e) {}
     return;
   }
-  el.textContent = t;
-  el.className = '';
-  try {
-    if (window.Flutter && window.Flutter.postMessage) {
-      window.Flutter.postMessage('status:' + t);
-    }
-  } catch (e) {}
-  // 提示默认 2s 后消失，避免长期盖在画面上
-  var ms = autoHideMs == null ? 2000 : autoHideMs;
+  el.textContent = t; el.className = '';
+  try { if (window.Flutter && window.Flutter.postMessage) window.Flutter.postMessage('status:' + t); } catch (e) {}
+  var ms = autoHideMs == null ? 1500 : autoHideMs;
   if (ms > 0) {
-    msgTimer = setTimeout(function () {
-      el.className = 'hide';
-      el.textContent = '';
-    }, ms);
+    msgTimer = setTimeout(function () { el.className = 'hide'; el.textContent = ''; }, ms);
   }
 }
 
@@ -56,34 +46,63 @@ function getSrc() {
   return window.__HLS_SRC__ || '';
 }
 
-function boot() {
+function destroyHls() {
+  try { if (hls) { hls.destroy(); } } catch (e) {}
+  hls = null;
+  if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
+}
+
+// 卡死检测：缓冲位置长时间不动则重建播放器
+function watchStall(video) {
+  if (stallTimer) clearInterval(stallTimer);
+  stallCount = 0;
+  lastBuf = 0;
+  stallTimer = setInterval(function () {
+    var b = 0;
+    try {
+      if (video.buffered && video.buffered.length) {
+        b = video.buffered.end(video.buffered.length - 1);
+      }
+    } catch (e) {}
+    if (Math.abs(b - lastBuf) < 0.05 && !video.seeking) {
+      stallCount++;
+    } else {
+      stallCount = 0;
+    }
+    lastBuf = b;
+    if (stallCount >= 8) { // ~8s 无进展
+      stallCount = 0;
+      say('画面卡住，正在恢复…', 2000);
+      boot(true);
+    }
+  }, 1000);
+}
+
+function boot(isRestart) {
+  if (isRestart) { destroyHls(); }
   var src = window.__HLS_SRC__ || getSrc();
   if (!src) { say('缺少视频地址', 0); return; }
-
   var video = document.getElementById('v');
 
   function loadHlsJs() {
-    if (typeof Hls === 'undefined') {
-      say('播放组件未加载', 0);
-      return;
-    }
-    if (!Hls.isSupported()) {
-      say('当前环境不支持', 0);
-      return;
-    }
-    say('');
-    var hls = new Hls({
-      maxBufferLength: 30,
-      maxMaxBufferLength: 60,
+    if (typeof Hls === 'undefined') { say('播放组件未加载', 0); return; }
+    if (!Hls.isSupported()) { say('当前环境不支持', 0); return; }
+    destroyHls();
+    // 控制内存：直播不要把缓冲堆太大，长时间播放不易卡死
+    hls = new Hls({
+      maxBufferLength: 12,
+      maxMaxBufferLength: 24,
+      maxBufferSize: 30 * 1000 * 1000,
+      maxBufferHole: 1.0,
       liveSyncDurationCount: 3,
-      liveMaxLatencyDurationCount: 8,
+      liveMaxLatencyDurationCount: 10,
       lowLatencyMode: false,
       enableWorker: true,
-      manifestLoadingTimeOut: 20000,
+      manifestLoadingTimeOut: 15000,
       manifestLoadingMaxRetry: 6,
-      levelLoadingTimeOut: 20000,
-      fragLoadingTimeOut: 25000,
-      fragLoadingMaxRetry: 8
+      levelLoadingTimeOut: 15000,
+      fragLoadingTimeOut: 20000,
+      fragLoadingMaxRetry: 10
     });
     window.__hls = hls;
     hls.loadSource(src);
@@ -92,23 +111,20 @@ function boot() {
       say('');
       var p = video.play();
       if (p && p.catch) p.catch(function () {});
+      watchStall(video);
     });
-    // 分片到达就清提示
     hls.on(Hls.Events.FRAG_LOADED, function () { say(''); });
-    hls.on(Hls.Events.FRAG_BUFFERED, function () { say(''); });
     video.addEventListener('playing', function () { say(''); });
     hls.on(Hls.Events.ERROR, function (e, d) {
       if (!d) return;
       if (d.fatal) {
         if (d.type === 'networkError') {
           say('网络中断，重试中…', 1500);
-          setTimeout(function () {
-            try { hls.startLoad(); } catch (_) {}
-          }, 500);
+          setTimeout(function () { try { hls.startLoad(); } catch (_) { boot(true); } }, 500);
         } else if (d.type === 'mediaError') {
-          try { hls.recoverMediaError(); } catch (_) { say('播放出错', 0); }
+          try { hls.recoverMediaError(); } catch (_) { boot(true); }
         } else {
-          say('播放出错', 2500);
+          boot(true);
         }
       }
     });
@@ -126,8 +142,8 @@ function boot() {
 }
 
 window.__hlsBoot = boot;
-if (document.readyState === 'complete') boot();
-else window.addEventListener('load', boot);
+if (document.readyState === 'complete') boot(false);
+else window.addEventListener('load', function () { boot(false); });
 </script>
 </body>
 </html>
