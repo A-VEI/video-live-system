@@ -12,7 +12,7 @@ class VideoPage extends StatefulWidget {
   State<VideoPage> createState() => _VideoPageState();
 }
 
-class _VideoPageState extends State<VideoPage> {
+class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   List<dynamic> _streams = [];
   int? _activeIdx;
   VideoPlayerController? _videoCtrl;
@@ -24,13 +24,23 @@ class _VideoPageState extends State<VideoPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadStreams();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _videoCtrl?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 切回前台：强制重建，避免白屏
+    if (state == AppLifecycleState.resumed && mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _loadStreams() async {

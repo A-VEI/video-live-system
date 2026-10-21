@@ -3,11 +3,11 @@ library;
 
 const String kDefaultBaseUrl = String.fromEnvironment(
   'BASE_URL',
-  defaultValue: 'http://112.25.181.90:8119',
+  defaultValue: 'http://112.25.181.94:8119',
 );
 
 /// 与服务端 VERSION 文件对齐；运行时以 package_info 的 versionName 为准。
-const String kFallbackAppVersion = '1.0.4';
+const String kFallbackAppVersion = '1.0.5';
 
 /// 服务器双出口：移动 / 电信。端口固定 8119。
 class ServerEndpoint {
@@ -21,7 +21,7 @@ class ServerEndpoint {
 }
 
 const List<ServerEndpoint> kServerEndpoints = [
-  ServerEndpoint('cmcc', '移动', '112.25.181.90'),
+  ServerEndpoint('cmcc', '移动', '112.25.181.94'),
   ServerEndpoint('ctcc', '电信', '222.92.63.222'),
 ];
 
