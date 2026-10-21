@@ -8,55 +8,101 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;overflow:hidden}
 video{width:100%;height:100%;object-fit:contain;background:#000}
-#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:14px/1.5 sans-serif;opacity:.8}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:14px/1.5 sans-serif;opacity:.85;padding:16px;text-align:center}
 </style>
 </head>
 <body>
 <video id="v" muted autoplay playsinline webkit-playsinline></video>
 <div id="msg">正在加载…</div>
-<script src="/static/hls.min.js"></script>
 <script>
-function getSrc(){
-  var m = location.search.match(/[?&]src=([^&]+)/);
-  return m ? decodeURIComponent(m[1]) : '';
-}
-var src = getSrc();
-var video = document.getElementById('v');
-var msg = document.getElementById('msg');
-if(!src){ msg.textContent='缺少视频地址'; }
-else if(Hls.isSupported()){
-  // 与网页端相同策略：预缓冲 30s，减少 2s 分片卡顿
-  var hls = new Hls({
-    maxBufferLength: 30,
-    maxMaxBufferLength: 60,
-    liveSyncDurationCount: 3,
-    liveMaxLatencyDurationCount: 6,
-    lowLatencyMode: false,
-    enableWorker: true,
-    manifestLoadingTimeOut: 15000,
-    manifestLoadingMaxRetry: 5,
-    levelLoadingTimeOut: 15000,
-    fragLoadingTimeOut: 20000,
-    fragLoadingMaxRetry: 6
-  });
-  hls.loadSource(src);
-  hls.attachMedia(video);
-  hls.on(Hls.Events.MANIFEST_PARSED, function(){
-    msg.style.display='none';
-    video.play();
-  });
-  hls.on(Hls.Events.ERROR, function(e, d){
-    if(d && d.fatal){
-      msg.style.display='flex';
-      msg.textContent = d.type === 'networkError' ? '网络中断，重试中…' : '播放出错';
-      if(d.type === 'networkError'){ hls.startLoad(); }
-      else { try{ hls.recoverMediaError(); }catch(_){} }
+function say(t){
+  var el=document.getElementById('msg');
+  if(t){ el.style.display='flex'; el.textContent=t; }
+  else { el.style.display='none'; }
+  try {
+    if (window.Flutter && window.Flutter.postMessage) {
+      window.Flutter.postMessage('status:' + (t || 'playing'));
     }
-  });
-} else {
-  video.src = src;
-  video.play();
+  } catch(e) {}
 }
+
+function getSrc(){
+  try {
+    var m = location.search.match(/[?&]src=([^&]+)/);
+    if (m) return decodeURIComponent(m[1]);
+  } catch(e) {}
+  return window.__HLS_SRC__ || '';
+}
+
+function boot(){
+  var src = window.__HLS_SRC__ || getSrc();
+  if (!src) { say('缺少视频地址'); return; }
+
+  var video = document.getElementById('v');
+  var canMse = typeof window.MediaSource !== 'undefined' ||
+               typeof window.ManagedMediaSource !== 'undefined';
+
+  function loadHlsJs() {
+    if (typeof Hls === 'undefined') {
+      say('播放组件未加载');
+      return;
+    }
+    if (!Hls.isSupported()) {
+      say('当前环境不支持，切换播放器');
+      return;
+    }
+    say('');
+    var hls = new Hls({
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      liveSyncDurationCount: 3,
+      liveMaxLatencyDurationCount: 8,
+      lowLatencyMode: false,
+      enableWorker: true,
+      manifestLoadingTimeOut: 20000,
+      manifestLoadingMaxRetry: 6,
+      levelLoadingTimeOut: 20000,
+      fragLoadingTimeOut: 25000,
+      fragLoadingMaxRetry: 8
+    });
+    window.__hls = hls;
+    hls.loadSource(src);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, function(){
+      say('');
+      var p = video.play();
+      if (p && p.catch) p.catch(function(){});
+    });
+    hls.on(Hls.Events.ERROR, function(e, d){
+      if (!d) return;
+      if (d.fatal) {
+        if (d.type === 'networkError') {
+          say('网络中断，重试中…');
+          setTimeout(function(){ try { hls.startLoad(); } catch(_){} }, 500);
+        } else if (d.type === 'mediaError') {
+          try { hls.recoverMediaError(); } catch(_) { say('播放出错'); }
+        } else {
+          say('播放出错');
+        }
+      }
+    });
+  }
+
+  // 先确保 hls.js 已加载
+  if (typeof Hls === 'undefined') {
+    var s = document.createElement('script');
+    s.src = '/static/hls.min.js';
+    s.onload = function(){ loadHlsJs(); };
+    s.onerror = function(){ say('播放组件未加载'); };
+    document.head.appendChild(s);
+  } else {
+    loadHlsJs();
+  }
+}
+
+window.__hlsBoot = boot;
+if (document.readyState === 'complete') boot();
+else window.addEventListener('load', boot);
 </script>
 </body>
 </html>

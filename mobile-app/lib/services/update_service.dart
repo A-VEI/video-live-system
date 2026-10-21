@@ -30,11 +30,31 @@ class UpdateService {
       final current = await AppVersion.current();
       final data = await ApiClient.instance.checkVersion();
       if (data == null) return null;
-      final latestVersion = data['version'] as String?;
-      if (latestVersion == null) return null;
+      final latestVersion = data['version'] as String? ?? current;
+      final updateUrl = data['update_url']?.toString() ?? '/api/app/download';
 
+      // 1) 优先比 buildId（CI 自动编号，无需手改版本号）
+      final serverBuild = (data['build_id'] is int)
+          ? data['build_id'] as int
+          : int.tryParse(data['build_id']?.toString() ?? '') ?? 0;
+      final localBuild = kBuildId;
+      if (serverBuild > 0 && localBuild > 0) {
+        if (serverBuild > localBuild) {
+          return {
+            'version': latestVersion,
+            'current': current,
+            'build_id': serverBuild,
+            'local_build_id': localBuild,
+            'update_url': ApiClient.instance.absoluteUrl(updateUrl),
+            'notes': data['notes'] ?? '',
+            'sha256': data['sha256'] ?? '',
+          };
+        }
+        return null; // 同 build 或已更新
+      }
+
+      // 2) 回退：语义化版本号
       if (_compareVersion(latestVersion, current) > 0) {
-        final updateUrl = data['update_url']?.toString() ?? '/api/app/download';
         return {
           'version': latestVersion,
           'current': current,
@@ -49,7 +69,7 @@ class UpdateService {
     return null;
   }
 
-  static int _compareVersion(String v1, String v2) {
+static int _compareVersion(String v1, String v2) {
     final p1 = v1.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     final p2 = v2.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     for (var i = 0; i < 3; i++) {

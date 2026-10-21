@@ -198,23 +198,18 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
             aspectRatio: 16 / 9,
             child: Stack(
               children: [
-                HlsWebViewPlayer(proxyUrl: _webProxyUrl!),
-                Positioned(
-                  top: 8,
-                  left: 8,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.redAccent,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text('LIVE',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold)),
-                  ),
+                HlsWebViewPlayer(
+                  proxyUrl: _webProxyUrl!,
+                  onFallbackNative: () {
+                    if (!mounted) return;
+                    setState(() {
+                      _useWebEngine = false;
+                      _videoLoading = true;
+                      _webProxyUrl = null;
+                    });
+                    final idx = _activeIdx;
+                    if (idx != null) _playStreamNative(idx);
+                  },
                 ),
               ],
             ),
@@ -228,26 +223,6 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
               alignment: Alignment.bottomCenter,
               children: [
                 VideoPlayer(_videoCtrl!),
-                if (_isLive)
-                  Positioned(
-                    top: 8,
-                    left: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'LIVE',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
                 _ControlsBar(
                   controller: _videoCtrl!,
                   isLive: _isLive,
@@ -437,18 +412,6 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (widget.isLive)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.redAccent,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text('LIVE',
-                                  style: TextStyle(
-                                      color: Colors.white, fontSize: 11)),
-                            ),
                         ],
                       ),
                     ),
@@ -551,9 +514,21 @@ class _FullscreenBarState extends State<_FullscreenBar> {
                 setState(() => _playing = !_playing);
               },
             ),
-          const Text(
-            '直播',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
+          Container(
+            margin: const EdgeInsets.only(left: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.redAccent,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Text(
+              'LIVE',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
           const Spacer(),
           IconButton(
@@ -646,18 +621,25 @@ class _ControlsBarState extends State<_ControlsBar> {
                 setState(() => _playing = !_playing);
               },
             ),
-          // 直播：不显示 position/duration 读秒
-          const Expanded(
-            child: Text(
+          // LIVE 徽标紧挨播放/暂停键
+          Container(
+            margin: const EdgeInsets.only(left: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.redAccent,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Text(
               'LIVE',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.2,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.8,
               ),
             ),
           ),
+          const Spacer(),
           IconButton(
             icon: const Icon(Icons.fullscreen, color: Colors.white, size: 28),
             onPressed: widget.onFullscreen,

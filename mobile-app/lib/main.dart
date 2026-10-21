@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'api/api_client.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
-import 'services/update_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,15 +79,8 @@ class _AuthGateState extends State<AuthGate> {
     _checkAppUpdate();
   }
 
-  void _checkAppUpdate() {
-    Future.delayed(const Duration(seconds: 2), () async {
-      if (!mounted) return;
-      final update = await UpdateService.checkUpdate();
-      if (update != null && mounted) {
-        showUpdateDialog(context, update);
-      }
-    });
-  }
+  // 不再自动弹更新；仅在设置里手动检查（带小红点提示）
+  void _checkAppUpdate() {}
 
   @override
   Widget build(BuildContext context) {

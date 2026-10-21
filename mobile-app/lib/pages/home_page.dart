@@ -22,6 +22,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _loadingMe = true;
   bool _switchingIsp = false;
   bool _webVideo = true;
+  bool _hasUpdate = false;
 
   @override
   void initState() {
@@ -31,6 +32,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _role = ApiClient.instance.role;
     _loadMe();
     _loadWebVideo();
+    _checkUpdateSilently();
+    _probeLines();
   }
 
   @override
@@ -56,9 +59,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleWebVideo(bool v) async {
+    // 先改 UI，再后台写服务器，避免点开关卡顿
+    setState(() => _webVideo = v);
     try {
       await ApiClient.instance.setWebVideoEnabled(v);
-      if (mounted) setState(() => _webVideo = v);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(v ? '已允许网页观看' : '已关闭网页观看，请用 App')),
@@ -145,8 +149,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() => _switchingIsp = true);
     await ApiClient.instance.setBaseUrl(ep.baseUrl);
     await ApiClient.instance.clearAuth();
+    // 用记住的账号自动登录
+    final ok = await ApiClient.instance.trySavedLogin();
     if (!mounted) return;
     setState(() => _switchingIsp = false);
+    if (ok != null && ok['ok'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已切换到 ${ep.label}，自动登录成功')),
+      );
+      setState(() {
+        _name = ok['name']?.toString() ?? _name;
+        _role = ok['role']?.toString() ?? _role;
+        _idx = 0;
+      });
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已切换到 ${ep.label}，请重新登录')),
     );
@@ -173,11 +190,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     await ApiClient.instance.setBaseUrl(best.baseUrl);
     await ApiClient.instance.clearAuth();
+    final ok = await ApiClient.instance.trySavedLogin();
     if (!mounted) return;
+    if (ok != null && ok['ok'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已自动切换到 ${best.label}，自动登录成功')),
+      );
+      setState(() {
+        _name = ok['name']?.toString() ?? _name;
+        _role = ok['role']?.toString() ?? _role;
+        _idx = 0;
+      });
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已自动切换到 ${best.label}，请重新登录')),
     );
     _gotoLogin();
+  }
+
+  Future<void> _checkUpdateSilently() async {
+    try {
+      final u = await UpdateService.checkUpdate();
+      if (mounted) setState(() => _hasUpdate = u != null);
+    } catch (_) {}
   }
 
   Future<void> _manualUpdate() async {
@@ -191,11 +227,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     Navigator.of(context).pop();
     if (update == null) {
+      setState(() => _hasUpdate = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('已是最新版本')),
       );
       return;
     }
+    setState(() => _hasUpdate = true);
     showUpdateDialog(context, update);
   }
 
@@ -277,7 +315,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
             ListTile(
               leading: const Icon(Icons.system_update_alt),
-              title: const Text('检查更新'),
+              title: Row(
+                children: [
+                  const Text('检查更新'),
+                  if (_hasUpdate) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
               subtitle: const Text('手动检查并安装新版本'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -304,6 +357,99 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ],
         ),
       ),
+    );
+  }
+
+  List<EndpointHealth> _health = [];
+
+  Future<void> _probeLines() async {
+    try {
+      final list = await EndpointProbe.probeAll();
+      if (mounted) setState(() => _health = list);
+    } catch (_) {}
+  }
+
+  /// 顶栏只读：两线测速 + 推荐标记（不可点击切换）
+  Widget _SpeedStrip() {
+    if (_health.isEmpty) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text('测速中…', style: TextStyle(fontSize: 11, color: Colors.grey[700])),
+        ],
+      );
+    }
+    final best = _health.isNotEmpty ? _health.first : null;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final h in _health)
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: h.ok
+                    ? (h.keepsUp ? Colors.green.shade50 : Colors.orange.shade50)
+                    : Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: h.ok
+                      ? (h.keepsUp
+                          ? Colors.green.shade300
+                          : Colors.orange.shade300)
+                      : Colors.red.shade200,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    h.ok ? Icons.speed : Icons.wifi_off,
+                    size: 12,
+                    color: h.ok
+                        ? (h.keepsUp ? Colors.green : Colors.orange)
+                        : Colors.red,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    h.ok
+                        ? '${h.endpoint.label} ${h.segMs ?? h.apiMs}ms'
+                        : '${h.endpoint.label} 不可用',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                  if (best != null && h.endpoint.id == best.endpoint.id && h.ok)
+                    Container(
+                      margin: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade600,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        '推荐',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -364,15 +510,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         title: Row(
           children: [
             const Text('Live', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 12),
-            _ispChip(),
+            const SizedBox(width: 8),
+            Expanded(child: _SpeedStrip()),
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: '设置',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: _openSettings,
+          Stack(
+            children: [
+              IconButton(
+                tooltip: '设置',
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: _openSettings,
+              ),
+              if (_hasUpdate)
+                Positioned(
+                  right: 10,
+                  top: 10,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),

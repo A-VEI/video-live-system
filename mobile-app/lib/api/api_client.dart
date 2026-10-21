@@ -92,6 +92,35 @@ class ApiClient {
     await prefs.remove('auth_token');
     await prefs.remove('auth_name');
     await prefs.remove('auth_role');
+    // 保留 saved_phone / saved_password 便于换线路后自动登录
+  }
+
+  // ── 记住账号口令（换线路自动登录）──
+  String? _savedPhone;
+  String? _savedPassword;
+
+  Future<void> _saveCredentials(String phone, String password) async {
+    _savedPhone = phone;
+    _savedPassword = password;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('saved_phone', phone);
+    await prefs.setString('saved_password', password);
+  }
+
+  Future<Map<String, dynamic>?> trySavedLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final phone = prefs.getString('saved_phone');
+    final password = prefs.getString('saved_password');
+    if (phone == null || password == null || phone.isEmpty || password.isEmpty) {
+      return null;
+    }
+    _savedPhone = phone;
+    _savedPassword = password;
+    try {
+      return await login(phone, password);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> setBaseUrl(String url) async {
@@ -138,6 +167,7 @@ class ApiClient {
           name: data['name'],
           role: data['role'],
         );
+        await _saveCredentials(phone, password);
         return {
           'ok': true,
           'phone': data['phone'] ?? phone,
