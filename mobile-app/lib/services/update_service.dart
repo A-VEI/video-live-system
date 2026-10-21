@@ -8,10 +8,6 @@ import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
 import '../config.dart';
 
-/// 当前构建号（CI: --dart-define=BUILD_ID=<run_number>）
-/// 与服务器 build.json 的 build_id 同一口径，否则更新判断会一直错
-const int kBuildId = int.fromEnvironment('BUILD_ID', defaultValue: 0);
-
 class AppVersion {
   static String? _cached;
 
