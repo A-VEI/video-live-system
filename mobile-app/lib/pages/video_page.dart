@@ -540,10 +540,15 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
+        resizeToAvoidBottomInset: false,
+        body: SizedBox.expand(
+          child: Stack(
           fit: StackFit.expand,
           children: [
-            HlsWebViewPlayer(proxyUrl: widget.proxyUrl),
+            HlsWebViewPlayer(
+              key: ValueKey('fs-${widget.proxyUrl}'),
+              proxyUrl: widget.proxyUrl,
+            ),
             // 盖在 WebView 上的点按层：视频只需播放，无需点到网页内
             Positioned.fill(
               child: GestureDetector(
@@ -604,6 +609,7 @@ class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
                 ),
               ),
           ],
+        ),
         ),
       ),
     );

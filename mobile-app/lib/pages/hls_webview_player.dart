@@ -39,9 +39,9 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
     return "'$escaped'";
   }
 
-  void _scheduleFallback() {
+  void _scheduleFallback([Duration delay = const Duration(milliseconds: 600)]) {
     _fallbackTimer?.cancel();
-    _fallbackTimer = Timer(const Duration(milliseconds: 600), () {
+    _fallbackTimer = Timer(delay, () {
       if (mounted) widget.onFallbackNative?.call();
     });
   }
@@ -72,11 +72,19 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
           if (!s.startsWith('status:')) return;
           final st = s.substring(7);
           if (mounted) setState(() => _status = st);
-          if (st.contains('网络中断') ||
-              st.contains('播放出错') ||
-              st.contains('不支持') ||
-              st.contains('缺少')) {
+          // 瞬时「网络中断，重试中」不立刻回退；播放中的 status:playing 清掉文案
+          if (st == 'playing' || st.isEmpty) {
+            if (mounted) setState(() => _status = '');
+          }
+          if (st.contains('不支持') ||
+              st.contains('缺少') ||
+              st.contains('播放组件未加载')) {
             _scheduleFallback();
+          } else if (st.contains('播放出错')) {
+            _scheduleFallback(const Duration(seconds: 3));
+          } else if (st.contains('网络中断')) {
+            // 网络抖动：稍后若仍失败再回退
+            _scheduleFallback(const Duration(seconds: 8));
           }
         },
       )
@@ -120,7 +128,7 @@ class _HlsWebViewPlayerState extends State<HlsWebViewPlayer>
       fit: StackFit.expand,
       children: [
         WebViewWidget(controller: _c),
-        if (!_ready || _status.contains('加载') || _status.contains('恢复'))
+        if (!_ready || _status.contains('加载组件') || _status == '正在恢复…')
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
