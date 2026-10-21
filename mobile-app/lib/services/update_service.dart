@@ -8,179 +8,131 @@ import 'package:path_provider/path_provider.dart';
 import '../api/api_client.dart';
 import '../config.dart';
 
-class AppVersion {
-  static String? _cached;
-
-  static Future<String> current() async {
-    if (_cached != null) return _cached!;
-    try {
-      final info = await PackageInfo.fromPlatform();
-      _cached = info.version.isNotEmpty ? info.version : kFallbackAppVersion;
-    } catch (_) {
-      _cached = kFallbackAppVersion;
-    }
-    return _cached!;
-  }
-}
-
+/// 更新判断：只比「构建时间戳 build_time」，版本号不参与。
 class UpdateCheckResult {
   final bool hasUpdate;
-  final String version;
-  final String current;
   final String updateUrl;
   final String sha256;
   final String notes;
-  final int serverBuild;
-  final int localBuild;
+  final int serverBuildId;
+  final int serverBuildTime;
+  final int localBuildId;
+  final int localBuildTime;
   final String reason;
 
   UpdateCheckResult({
     required this.hasUpdate,
-    required this.version,
-    required this.current,
     required this.updateUrl,
     required this.sha256,
     required this.notes,
-    required this.serverBuild,
-    required this.localBuild,
+    required this.serverBuildId,
+    required this.serverBuildTime,
+    required this.localBuildId,
+    required this.localBuildTime,
     required this.reason,
   });
 }
 
 class UpdateService {
-  /// 检查更新。返回结果对象，便于 UI 显示「为什么没有更新」。
   static Future<UpdateCheckResult> check() async {
-    final current = await AppVersion.current();
+    final localId = kBuildId;
+    final localTime = kBuildTime;
     try {
       final data = await ApiClient.instance.checkVersion();
       if (data == null) {
         return UpdateCheckResult(
           hasUpdate: false,
-          version: current,
-          current: current,
           updateUrl: '',
           sha256: '',
           notes: '',
-          serverBuild: 0,
-          localBuild: kBuildId,
+          serverBuildId: 0,
+          serverBuildTime: 0,
+          localBuildId: localId,
+          localBuildTime: localTime,
           reason: '无法连接服务器',
         );
       }
 
-      final latest = (data['version'] as String?) ?? current;
       final updateUrl = ApiClient.instance.absoluteUrl(
         (data['update_url'] as String?) ?? '/api/app/download',
       );
       final sha = (data['sha256'] as String?) ?? '';
       final notes = (data['notes'] as String?) ?? '';
-      final serverBuild = _asInt(data['build_id']);
-      final localBuild = kBuildId;
+      final serverId = _asInt(data['build_id']);
+      final serverTime = _asInt(data['build_time']);
 
-      // 规则 1：build_id 都有效时，只看 build_id（部署时必须与 CI 同号）
-      if (serverBuild > 0 && localBuild > 0) {
-        final up = serverBuild > localBuild;
+      // 规则：只看时间戳；时间戳缺省时用 build_id
+      if (serverTime > 0 && localTime > 0) {
+        final up = serverTime > localTime;
         return UpdateCheckResult(
           hasUpdate: up,
-          version: latest,
-          current: current,
           updateUrl: updateUrl,
           sha256: sha,
           notes: notes,
-          serverBuild: serverBuild,
-          localBuild: localBuild,
+          serverBuildId: serverId,
+          serverBuildTime: serverTime,
+          localBuildId: localId,
+          localBuildTime: localTime,
           reason: up
-              ? '有新构建 $serverBuild > $localBuild'
-              : '已是最新构建 $localBuild',
+              ? '有新构建 ${_fmtTime(serverTime)}'
+              : '已是最新构建 ${_fmtTime(localTime)}',
         );
       }
 
-      // 规则 2：包内无 build 号（kBuildId=0）→ 只比版本；
-      // 版本相同一律不提示，避免“同版本号反复要求更新”
-      final cmp = _compareVersion(latest, current);
-      if (localBuild == 0 && cmp <= 0) {
+      if (serverId > 0 && localId > 0) {
+        final up = serverId > localId;
         return UpdateCheckResult(
-          hasUpdate: false,
-          version: latest,
-          current: current,
+          hasUpdate: up,
           updateUrl: updateUrl,
           sha256: sha,
           notes: notes,
-          serverBuild: serverBuild,
-          localBuild: localBuild,
-          reason: '版本相同 $current（无构建号）',
-        );
-      }
-      if (cmp > 0) {
-        return UpdateCheckResult(
-          hasUpdate: true,
-          version: latest,
-          current: current,
-          updateUrl: updateUrl,
-          sha256: sha,
-          notes: notes,
-          serverBuild: serverBuild,
-          localBuild: localBuild,
-          reason: '版本 $latest > $current',
+          serverBuildId: serverId,
+          serverBuildTime: serverTime,
+          localBuildId: localId,
+          localBuildTime: localTime,
+          reason: up
+              ? '有新构建 #$serverId'
+              : '已是最新构建 #$localId',
         );
       }
 
+      // 都缺构建信息：不提示（不再用版本号）
       return UpdateCheckResult(
         hasUpdate: false,
-        version: latest,
-        current: current,
         updateUrl: updateUrl,
         sha256: sha,
         notes: notes,
-        serverBuild: serverBuild,
-        localBuild: localBuild,
-        reason: serverBuild == 0 && localBuild == 0
-            ? '版本相同 $current'
-            : '无更新（server=$serverBuild local=$localBuild ver=$latest）',
+        serverBuildId: serverId,
+        serverBuildTime: serverTime,
+        localBuildId: localId,
+        localBuildTime: localTime,
+        reason: '无构建信息，不提示更新',
       );
     } catch (e) {
       return UpdateCheckResult(
         hasUpdate: false,
-        version: current,
-        current: current,
         updateUrl: '',
         sha256: '',
         notes: '',
-        serverBuild: 0,
-        localBuild: kBuildId,
+        serverBuildId: 0,
+        serverBuildTime: 0,
+        localBuildId: localId,
+        localBuildTime: localTime,
         reason: '检查失败: $e',
       );
     }
   }
 
-  /// 兼容旧调用：有更新返回 Map，否则 null
-  static Future<Map<String, dynamic>?> checkUpdate() async {
-    final r = await check();
-    if (!r.hasUpdate) return null;
-    return {
-      'version': r.version,
-      'current': r.current,
-      'update_url': r.updateUrl,
-      'sha256': r.sha256,
-      'notes': r.notes,
-      'build_id': r.serverBuild,
-      'local_build_id': r.localBuild,
-    };
+  static String _fmtTime(int epoch) {
+    if (epoch <= 0) return '—';
+    final dt = DateTime.fromMillisecondsSinceEpoch(epoch * 1000);
+    String p(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}${p(dt.month)}${p(dt.day)}-${p(dt.hour)}${p(dt.minute)}${p(dt.second)}';
   }
 
   static int _asInt(dynamic v) {
     if (v is int) return v;
     return int.tryParse(v?.toString() ?? '') ?? 0;
-  }
-
-  static int _compareVersion(String v1, String v2) {
-    final p1 = v1.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    final p2 = v2.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    for (var i = 0; i < 3; i++) {
-      final a = i < p1.length ? p1[i] : 0;
-      final b = i < p2.length ? p2[i] : 0;
-      if (a != b) return a.compareTo(b);
-    }
-    return 0;
   }
 
   static Future<void> downloadAndInstall(
@@ -203,7 +155,8 @@ class UpdateService {
       },
     );
     if (expectSha256 != null && expectSha256.isNotEmpty) {
-      final digest = await _fileSha256(savePath);
+      final bytes = await File(savePath).readAsBytes();
+      final digest = sha256.convert(bytes).toString();
       if (digest.toLowerCase() != expectSha256.toLowerCase()) {
         try {
           File(savePath).deleteSync();
@@ -213,11 +166,6 @@ class UpdateService {
     }
     final result = await OpenFilex.open(savePath);
     debugPrint('install result: ${result.type}');
-  }
-
-  static Future<String> _fileSha256(String path) async {
-    final bytes = await File(path).readAsBytes();
-    return sha256.convert(bytes).toString();
   }
 }
 
@@ -264,19 +212,14 @@ class _UpdateDialogState extends State<_UpdateDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final ver = widget.update['version']?.toString() ?? '';
-    final cur = widget.update['current']?.toString() ?? '';
-    final sb = widget.update['build_id'];
-    final lb = widget.update['local_build_id'];
+    final label = widget.update['label']?.toString() ?? '';
     return AlertDialog(
-      title: Text('发现新版本 $ver'),
+      title: Text(label.isEmpty ? '发现新构建' : '发现新构建 $label'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('当前: $cur'),
-          if (sb != null && lb != null)
-            Text('构建: $lb → $sb', style: const TextStyle(fontSize: 12)),
+          Text(widget.update['reason']?.toString() ?? ''),
           const SizedBox(height: 8),
           if (widget.update['notes']?.toString().isNotEmpty == true)
             Text(widget.update['notes'].toString(),

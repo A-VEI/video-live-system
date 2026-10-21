@@ -647,17 +647,20 @@ def app_version():
     if sha:
         _set_setting('apk_sha256', sha)
     build_id = 0
+    build_time = 0
     meta_path = os.path.join(app.root_path, 'static', 'app', 'build.json')
     try:
         if os.path.exists(meta_path):
             with open(meta_path, encoding='utf-8') as _f:
                 _m = json_mod.load(_f)
             build_id = int(_m.get('build_id') or 0)
+            build_time = int(_m.get('build_time') or 0)
     except Exception:
-        build_id = 0
+        pass
     return jsonify(
         version=APP_VERSION,
         build_id=build_id,
+        build_time=build_time,
         update_url='/api/app/download',
         size=size,
         sha256=sha or '',

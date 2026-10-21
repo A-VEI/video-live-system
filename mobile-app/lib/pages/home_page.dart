@@ -241,13 +241,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
     showUpdateDialog(context, {
-      'version': r.version,
-      'current': r.current,
       'update_url': r.updateUrl,
       'sha256': r.sha256,
       'notes': r.notes,
-      'build_id': r.serverBuild,
-      'local_build_id': r.localBuild,
+      'reason': r.reason,
+      'label': r.serverBuildTime > 0
+          ? r.serverBuildTime.toString()
+          : r.serverBuildId.toString(),
     });
   }
 
@@ -361,7 +361,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               leading: const Icon(Icons.info_outline),
               title: const Text('构建信息'),
               subtitle: Text(
-                  'build $kBuildId · ${ApiClient.instance.playEngine == PlayEngine.hlsjs ? "流畅" : "原生"}'),
+                  'build $kBuildId / t$kBuildTime · ${ApiClient.instance.playEngine == PlayEngine.hlsjs ? "流畅" : "原生"}'),
             ),
             ListTile(
               leading: const Icon(Icons.system_update_alt),

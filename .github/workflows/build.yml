@@ -25,7 +25,6 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # Android 工程已提交进仓库，禁止 flutter create 覆盖 Manifest/FileProvider/图标
       - name: Verify Android project
         run: |
           test -f android/app/src/main/AndroidManifest.xml
@@ -40,42 +39,39 @@ jobs:
         run: flutter analyze --no-fatal-infos || true
 
       - name: Build APK
-        run: flutter build apk --release --dart-define=BUILD_ID=${{ github.run_number }}
+        run: |
+          BUILD_TIME=$(date +%s)
+          STAMP=$(date -u +%Y%m%d%H%M%S)
+          echo "BUILD_TIME=$BUILD_TIME" >> "$GITHUB_ENV"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          flutter build apk --release \
+            --dart-define=BUILD_ID=${{ github.run_number }} \
+            --dart-define=BUILD_TIME=$BUILD_TIME
         env:
-          # 覆盖默认服务器；不传则用 config.dart 中默认值
           BASE_URL: ${{ vars.BASE_URL || 'http://112.25.181.94:8119' }}
 
-      - name: Sync server VERSION
+      - name: Package artifact (name = build id + timestamp)
         run: |
-          # 从 pubspec version 提取 1.0.3 → ../VERSION
-          V=$(grep -E '^version:' pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
-          echo "$V" > ../VERSION
-          echo "App version=$V" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Write build.json
-        run: |
-          APK=build/app/outputs/flutter-apk/app-release.apk
-          SHA=$(sha256sum "$APK" | awk '{print $1}')
-          SIZE=$(stat -c%s "$APK")
-          V=$(grep -E '^version:' pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
-          printf '{"build_id": %s, "sha256": "%s", "size": %s, "version": "%s"}\n' \
-            "${{ github.run_number }}" "$SHA" "$SIZE" "$V" > build.json
-          echo "build.json:"; cat build.json
+          APK_SRC=build/app/outputs/flutter-apk/app-release.apk
+          OUT="video-live_build${{ github.run_number }}_${STAMP}.apk"
+          cp "$APK_SRC" "$OUT"
+          SHA=$(sha256sum "$OUT" | awk '{print $1}')
+          SIZE=$(stat -c%s "$OUT")
+          cat > build-meta.json <<EOF
+          {"build_id": ${{ github.run_number }}, "build_time": $BUILD_TIME, "stamp": "$STAMP", "sha256": "$SHA", "size": $SIZE, "apk": "$OUT"}
+          EOF
+          echo "built $OUT"
+          cat build-meta.json
+          echo "APK_NAME=$OUT" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: video-live-apk
-          path: mobile-app/build/app/outputs/flutter-apk/app-release.apk
+          path: mobile-app/${{ env.APK_NAME }}
 
-      - name: Upload build.json
+      - name: Upload build-meta
         uses: actions/upload-artifact@v4
         with:
           name: build-meta
-          path: mobile-app/build.json
-
-      - name: Upload VERSION
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-version
-          path: VERSION
+          path: mobile-app/build-meta.json

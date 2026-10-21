@@ -10,6 +10,8 @@ const String kFallbackAppVersion = '1.0.5';
 
 /// CI 构建号：--dart-define=BUILD_ID=N
 const int kBuildId = int.fromEnvironment('BUILD_ID', defaultValue: 0);
+/// 构建时间戳（秒）。更新只看时间戳，不看版本号
+const int kBuildTime = int.fromEnvironment('BUILD_TIME', defaultValue: 0);
 
 /// 线路：界面只展示名称，不显示 IP
 class ServerEndpoint {

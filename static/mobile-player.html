@@ -2,53 +2,73 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Live</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#000;overflow:hidden}
-video{width:100%;height:100%;object-fit:contain;background:#000}
-#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:14px/1.5 sans-serif;opacity:.85;padding:16px;text-align:center}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;position:fixed;inset:0}
+#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:14px/1.5 sans-serif;opacity:.85;padding:16px;text-align:center;pointer-events:none;z-index:2}
+#msg.hide{display:none}
 </style>
 </head>
 <body>
 <video id="v" muted autoplay playsinline webkit-playsinline></video>
-<div id="msg">正在加载…</div>
+<div id="msg" class="hide"></div>
 <script>
-function say(t){
-  var el=document.getElementById('msg');
-  if(t){ el.style.display='flex'; el.textContent=t; }
-  else { el.style.display='none'; }
+var msgTimer = null;
+
+function say(t, autoHideMs) {
+  var el = document.getElementById('msg');
+  if (msgTimer) { clearTimeout(msgTimer); msgTimer = null; }
+  if (!t) {
+    el.className = 'hide';
+    el.textContent = '';
+    try {
+      if (window.Flutter && window.Flutter.postMessage) {
+        window.Flutter.postMessage('status:playing');
+      }
+    } catch (e) {}
+    return;
+  }
+  el.textContent = t;
+  el.className = '';
   try {
     if (window.Flutter && window.Flutter.postMessage) {
-      window.Flutter.postMessage('status:' + (t || 'playing'));
+      window.Flutter.postMessage('status:' + t);
     }
-  } catch(e) {}
+  } catch (e) {}
+  // 提示默认 2s 后消失，避免长期盖在画面上
+  var ms = autoHideMs == null ? 2000 : autoHideMs;
+  if (ms > 0) {
+    msgTimer = setTimeout(function () {
+      el.className = 'hide';
+      el.textContent = '';
+    }, ms);
+  }
 }
 
-function getSrc(){
+function getSrc() {
   try {
     var m = location.search.match(/[?&]src=([^&]+)/);
     if (m) return decodeURIComponent(m[1]);
-  } catch(e) {}
+  } catch (e) {}
   return window.__HLS_SRC__ || '';
 }
 
-function boot(){
+function boot() {
   var src = window.__HLS_SRC__ || getSrc();
-  if (!src) { say('缺少视频地址'); return; }
+  if (!src) { say('缺少视频地址', 0); return; }
 
   var video = document.getElementById('v');
-  var canMse = typeof window.MediaSource !== 'undefined' ||
-               typeof window.ManagedMediaSource !== 'undefined';
 
   function loadHlsJs() {
     if (typeof Hls === 'undefined') {
-      say('播放组件未加载');
+      say('播放组件未加载', 0);
       return;
     }
     if (!Hls.isSupported()) {
-      say('当前环境不支持，切换播放器');
+      say('当前环境不支持', 0);
       return;
     }
     say('');
@@ -68,32 +88,37 @@ function boot(){
     window.__hls = hls;
     hls.loadSource(src);
     hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, function(){
+    hls.on(Hls.Events.MANIFEST_PARSED, function () {
       say('');
       var p = video.play();
-      if (p && p.catch) p.catch(function(){});
+      if (p && p.catch) p.catch(function () {});
     });
-    hls.on(Hls.Events.ERROR, function(e, d){
+    // 分片到达就清提示
+    hls.on(Hls.Events.FRAG_LOADED, function () { say(''); });
+    hls.on(Hls.Events.FRAG_BUFFERED, function () { say(''); });
+    video.addEventListener('playing', function () { say(''); });
+    hls.on(Hls.Events.ERROR, function (e, d) {
       if (!d) return;
       if (d.fatal) {
         if (d.type === 'networkError') {
-          say('网络中断，重试中…');
-          setTimeout(function(){ try { hls.startLoad(); } catch(_){} }, 500);
+          say('网络中断，重试中…', 1500);
+          setTimeout(function () {
+            try { hls.startLoad(); } catch (_) {}
+          }, 500);
         } else if (d.type === 'mediaError') {
-          try { hls.recoverMediaError(); } catch(_) { say('播放出错'); }
+          try { hls.recoverMediaError(); } catch (_) { say('播放出错', 0); }
         } else {
-          say('播放出错');
+          say('播放出错', 2500);
         }
       }
     });
   }
 
-  // 先确保 hls.js 已加载
   if (typeof Hls === 'undefined') {
     var s = document.createElement('script');
     s.src = '/static/hls.min.js';
-    s.onload = function(){ loadHlsJs(); };
-    s.onerror = function(){ say('播放组件未加载'); };
+    s.onload = function () { loadHlsJs(); };
+    s.onerror = function () { say('播放组件未加载', 0); };
     document.head.appendChild(s);
   } else {
     loadHlsJs();
