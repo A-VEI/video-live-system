@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../config.dart';
 import '../services/endpoint_probe.dart';
@@ -23,7 +24,23 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    _loadSaved();
     _autoPickLine();
+  }
+
+  /// 退出后仍记住标识/密钥，下次进入自动填入
+  Future<void> _loadSaved() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final u = sp.getString('saved_phone') ?? '';
+      final s = sp.getString('saved_password') ?? '';
+      if (mounted) {
+        setState(() {
+          if (u.isNotEmpty) _userCtrl.text = u;
+          if (s.isNotEmpty) _secretCtrl.text = s;
+        });
+      }
+    } catch (_) {}
   }
 
   /// 进登录页自动测速，静默切到更优线路（界面只显示线路名）

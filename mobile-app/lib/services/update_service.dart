@@ -98,8 +98,22 @@ class UpdateService {
         );
       }
 
-      // 规则 2：一侧 build_id 缺失 → 用版本号
+      // 规则 2：包内无 build 号（kBuildId=0）→ 只比版本；
+      // 版本相同一律不提示，避免“同版本号反复要求更新”
       final cmp = _compareVersion(latest, current);
+      if (localBuild == 0 && cmp <= 0) {
+        return UpdateCheckResult(
+          hasUpdate: false,
+          version: latest,
+          current: current,
+          updateUrl: updateUrl,
+          sha256: sha,
+          notes: notes,
+          serverBuild: serverBuild,
+          localBuild: localBuild,
+          reason: '版本相同 $current（无构建号）',
+        );
+      }
       if (cmp > 0) {
         return UpdateCheckResult(
           hasUpdate: true,

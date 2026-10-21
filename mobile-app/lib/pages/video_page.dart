@@ -315,7 +315,11 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
                 child: ColoredBox(
                   color: Colors.black,
                   child: _useWebEngine && _webProxyUrl != null
-                      ? HlsWebViewPlayer(
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            HlsWebViewPlayer(
+                          key: ValueKey('web-$_webProxyUrl'),
                           proxyUrl: _webProxyUrl!,
                           onFallbackNative: () {
                             if (!mounted) return;
@@ -327,6 +331,17 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
                             final idx = _activeIdx;
                             if (idx != null) _playStreamNative(idx);
                           },
+                            ),
+                            Positioned(
+                              right: 8,
+                              bottom: 8,
+                              child: IconButton(
+                                color: Colors.white,
+                                icon: const Icon(Icons.fullscreen),
+                                onPressed: _enterFullscreen,
+                              ),
+                            ),
+                          ],
                         )
                       : (_videoCtrl != null && _videoCtrl!.value.isInitialized)
                           ? Stack(
@@ -371,18 +386,33 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
                 aspectRatio: 16 / 9,
                 child: ColoredBox(
                   color: Colors.black,
-                  child: HlsWebViewPlayer(
-                    proxyUrl: _webProxyUrl!,
-                    onFallbackNative: () {
-                      if (!mounted) return;
-                      setState(() {
-                        _useWebEngine = false;
-                        _videoLoading = true;
-                        _webProxyUrl = null;
-                      });
-                      final idx = _activeIdx;
-                      if (idx != null) _playStreamNative(idx);
-                    },
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      HlsWebViewPlayer(
+                        key: ValueKey('webp-$_webProxyUrl'),
+                        proxyUrl: _webProxyUrl!,
+                        onFallbackNative: () {
+                          if (!mounted) return;
+                          setState(() {
+                            _useWebEngine = false;
+                            _videoLoading = true;
+                            _webProxyUrl = null;
+                          });
+                          final idx = _activeIdx;
+                          if (idx != null) _playStreamNative(idx);
+                        },
+                      ),
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: IconButton(
+                          color: Colors.white,
+                          icon: const Icon(Icons.fullscreen),
+                          onPressed: _enterFullscreen,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               )

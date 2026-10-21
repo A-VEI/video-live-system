@@ -358,6 +358,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 onChanged: _webVideoSaving ? null : _toggleWebVideo,
               ),
             ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('构建信息'),
+              subtitle: Text(
+                  'build $kBuildId · ${ApiClient.instance.playEngine == PlayEngine.hlsjs ? "流畅" : "原生"}'),
+            ),
+            ListTile(
               leading: const Icon(Icons.system_update_alt),
               title: Row(
                 children: [
