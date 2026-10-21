@@ -585,11 +585,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: '分享',
-            icon: const Icon(Icons.qr_code_2),
-            onPressed: _showShareQr,
-          ),
           Stack(
             children: [
               IconButton(
