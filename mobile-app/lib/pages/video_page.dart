@@ -448,6 +448,103 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
   }
 }
 
+
+/// 流畅引擎全屏：横屏 + 沉浸式 + WebView 播放
+class _FullscreenWebViewPage extends StatefulWidget {
+  final String proxyUrl;
+  final String title;
+  const _FullscreenWebViewPage({required this.proxyUrl, required this.title});
+
+  @override
+  State<_FullscreenWebViewPage> createState() => _FullscreenWebViewPageState();
+}
+
+class _FullscreenWebViewPageState extends State<_FullscreenWebViewPage> {
+  bool _showControls = true;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
+        overlays: SystemUiOverlay.values);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTap: () => setState(() => _showControls = !_showControls),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            HlsWebViewPlayer(proxyUrl: widget.proxyUrl),
+            if (_showControls)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black54, Colors.transparent],
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white, size: 28),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 16),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('LIVE',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ═══ 独立全屏页面 ═══
 class _FullscreenVideoPage extends StatefulWidget {
   final VideoPlayerController controller;

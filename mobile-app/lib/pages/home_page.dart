@@ -17,6 +17,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  List<EndpointHealth> _health = [];
   int _idx = 0;
   String _name = '';
   String _role = 'user';
@@ -248,6 +249,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       'build_id': r.serverBuild,
       'local_build_id': r.localBuild,
     });
+  }
+
+  Future<void> _probeLines() async {
+    try {
+      final list = await EndpointProbe.probeAll();
+      if (mounted) setState(() => _health = list);
+    } catch (_) {}
   }
 
   /// 右侧抽屉：设置
