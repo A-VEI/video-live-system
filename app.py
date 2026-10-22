@@ -20,6 +20,10 @@ from stream_token import (
     rewrite_m3u8, strip_token_args,
 )
 import hls_cache
+from config import (DEFAULT_STREAMS, DOWNLOAD_CODE, APP_PORT,
+                    LOCK_FAILS, LOCK_SECONDS)
+from logging_setup import get_logger
+log = get_logger()
 from security import (
     hash_password, verify_password, password_policy_error, is_valid_phone,
     generate_password, is_disallowed_ip, validate_proxy_target,
@@ -53,27 +57,27 @@ def _load_app_version() -> str:
             return f.read().strip() or '0.0.0'
     except OSError:
         return '0.0.0'
-DEFAULT_STREAMS = [
-    {'name': '警情信息',        'url': 'http://192.168.181.106/live/0/hls.m3u8', 'sort': 1},
-    {'name': '一体化指挥平台',  'url': 'http://192.168.181.103/live/0/hls.m3u8', 'sort': 2},
-    {'name': '现场图传',        'url': 'http://192.168.181.105/live/0/hls.m3u8', 'sort': 3},
-    {'name': '无人机画面',      'url': 'http://192.168.181.104/live/0/hls.m3u8', 'sort': 4},
-    {'name': '社会面监控',      'url': 'http://192.168.181.101/live/0/hls.m3u8', 'sort': 5},
-    {'name': '全国应急指挥系统', 'url': 'http://192.168.181.102/live/0/hls.m3u8', 'sort': 6},
-]
+# streams 来自 config.DEFAULT_STREAMS
 # ── 登录频率限制 ──────────────────────────────────────────────
 _login_attempts = {}  # {phone: [timestamp, ...]}
-LOGIN_MAX_ATTEMPTS = 5
-LOGIN_WINDOW = 300  # 5 分钟
+LOGIN_MAX_ATTEMPTS = LOCK_FAILS
+LOGIN_WINDOW = LOCK_SECONDS
+_login_locked_until = {}
 def is_rate_limited(phone):
     now = time.time()
+    if _login_locked_until.get(phone, 0) > now:
+        return True
     attempts = _login_attempts.get(phone, [])
-    # 清理过期记录
     attempts = [t for t in attempts if now - t < LOGIN_WINDOW]
     _login_attempts[phone] = attempts
     return len(attempts) >= LOGIN_MAX_ATTEMPTS
 def record_attempt(phone):
-    _login_attempts.setdefault(phone, []).append(time.time())
+    now = time.time()
+    _login_attempts.setdefault(phone, []).append(now)
+    if len(_login_attempts[phone]) >= LOGIN_MAX_ATTEMPTS:
+        _login_locked_until[phone] = now + LOCK_SECONDS
+        _login_attempts[phone] = []
+        log.warning('login locked phone=%s', phone)
 # ── JWT (标准库实现, 无第三方依赖) ─────────────────────────
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
@@ -209,7 +213,7 @@ def init_db():
             db.execute("INSERT INTO settings (key,value) VALUES (?,?)",
                        (key, value))
     _ensure_setting('web_video_enabled', '1')
-    _ensure_setting('download_code', '8119')
+    _ensure_setting('download_code', DOWNLOAD_CODE)
     _ensure_setting('apk_sha256', '')
     if db.execute('SELECT COUNT(*) FROM streams').fetchone()[0] == 0:
         for s in DEFAULT_STREAMS:
@@ -419,6 +423,7 @@ def login():
                           (phone,)).fetchone()
         if not user or not verify_password(password, user['password_hash']):
             _audit(phone, 'login_failed', request.remote_addr)
+            log.warning('login failed phone=%s ip=%s', phone, request.remote_addr)
             return render_template('landing.html', error='验证失败',
                                    download_code=_get_setting('download_code', ''))
         # 登录成功, 清除该手机号的失败记录
@@ -431,6 +436,7 @@ def login():
                    (phone, request.remote_addr))
         db.commit()
         _audit(phone, 'login_ok')
+        log.info('login ok phone=%s', phone)
         _ensure_csrf()
         if user['must_change_password']:
             return redirect('/account/password')
@@ -442,20 +448,6 @@ def logout():
     session.clear()
     return redirect('/account/login')
 # (dashboard 已改为 video_page, 见上方)
-@app.route('/admin/users')
-@app.route('/users')  # 兼容
-@admin_required
-def users_page():
-    db = get_db()
-    users = db.execute('SELECT * FROM users ORDER BY id').fetchall()
-    return render_template('users.html', users=users, name=session.get('name'))
-@app.route('/admin/devices')
-@app.route('/devices')  # 兼容
-@admin_required
-def devices_page():
-    db = get_db()
-    streams = db.execute('SELECT * FROM streams ORDER BY sort').fetchall()
-    return render_template('devices.html', streams=streams, name=session.get('name'))
 # ── HLS 代理（方案 B：签名 URL，播放器无需带 Header）─────────
 def _proxy_path_host(stream_path: str) -> str:
     return (stream_path.split('/', 1) or [''])[0]
@@ -1066,9 +1058,20 @@ def hls_segment(sid, filename):
         'Cache-Control': 'public, max-age=30',
         'Access-Control-Allow-Origin': '*',
     })
+
+
+# ── 日志：Web 查看 / App 上报 ─────────────────────────────
+@app.route('/api/admin/metrics')
+@any_admin
+def api_admin_metrics():
+    from sysmetrics import snapshot
+    return jsonify(ok=True, **snapshot())
+
+
+
 # ── 启动 ──────────────────────────────────────────────────────
 if __name__ == '__main__':
     init_db()
     _start_hls_cache_workers()
-    port = int(os.environ.get('PORT', '8120'))
+    port = int(os.environ.get('PORT', APP_PORT))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

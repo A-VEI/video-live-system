@@ -81,6 +81,30 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _reconnect() async {
+    final idx = _activeIdx;
+    try {
+      final data = await ApiClient.instance.getStreams();
+      if (mounted) setState(() => _streams = data);
+    } catch (_) {}
+    if (idx != null && mounted) {
+      final gen = ++_playGen;
+      final url = ApiClient.instance.absoluteUrl(
+          ( (_streams[idx] as Map)['proxy_url'] ?? '' ).toString());
+      setState(() {
+        _webProxyUrl = url;
+        _videoLoading = true;
+      });
+      // 重建同 URL 以触发 didUpdateWidget
+      if (mounted && gen == _playGen) {
+        setState(() {
+          _webProxyUrl = '$url#r=$gen';
+          _videoLoading = false;
+        });
+      }
+    }
+  }
+
   void _enterFullscreen() {
     if (_webProxyUrl == null) return;
     Navigator.of(context).push(
@@ -134,10 +158,21 @@ class _VideoPageState extends State<VideoPage> with WidgetsBindingObserver {
         Positioned(
           right: 8,
           bottom: 8,
-          child: IconButton(
-            color: Colors.white,
-            icon: const Icon(Icons.fullscreen),
-            onPressed: _enterFullscreen,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                color: Colors.white,
+                tooltip: '重新连接',
+                icon: const Icon(Icons.refresh),
+                onPressed: _reconnect,
+              ),
+              IconButton(
+                color: Colors.white,
+                icon: const Icon(Icons.fullscreen),
+                onPressed: _enterFullscreen,
+              ),
+            ],
           ),
         ),
       ],

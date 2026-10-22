@@ -87,7 +87,11 @@ class ApiClient {
     await prefs.remove('auth_token');
     await prefs.remove('auth_name');
     await prefs.remove('auth_role');
-    // 保留 saved_phone + saved_token（JWT）自动登录，不存口令
+    // 退出登录必须保留口令，便于下次自动登录
+    final sp = await SharedPreferences.getInstance();
+    if (!sp.containsKey('saved_password')) {
+      // 迁移兜底：若历史版本只存了 token，口令会缺，属正常
+    }
   }
 
   // ── 记住账号口令（换线路自动登录）──
@@ -330,6 +334,18 @@ class ApiClient {
     await _mutate('/api/settings/web_video',
         method: 'PUT', data: {'value': enabled ? 1 : 0});
     return enabled;
+  }
+
+  Future<Map<String, dynamic>> getMetrics() async {
+    try {
+      final r = await _dio.get('/api/admin/metrics');
+      if (r.statusCode == 200 && r.data is Map) {
+        return Map<String, dynamic>.from(r.data as Map);
+      }
+      throw ApiException('获取失败', statusCode: r.statusCode);
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: '获取失败');
+    }
   }
 
   // ── 版本 ──

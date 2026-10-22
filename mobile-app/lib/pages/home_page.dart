@@ -267,6 +267,68 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return kBuildId > 0 ? '#$kBuildId' : '—';
   }
 
+  Future<void> _showMetrics() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    Map<String, dynamic> data;
+    try {
+      data = await ApiClient.instance.getMetrics();
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '获取失败')),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    final cpu = (data['cpu_percent'] ?? 0).toDouble();
+    final mem = (data['mem'] as Map?) ?? {};
+    final disk = (data['disk'] as Map?) ?? {};
+    final load = (data['load'] as List?)?.join(' / ') ?? '';
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('性能监控',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Text('CPU  ${cpu.toStringAsFixed(1)}%'),
+              const SizedBox(height: 8),
+              Text(
+                  '内存  ${mem['used_mb'] ?? 0} / ${mem['total_mb'] ?? 0} MB · ${mem['percent'] ?? 0}%'),
+              const SizedBox(height: 8),
+              Text(
+                  '磁盘  ${disk['used_gb'] ?? 0} / ${disk['total_gb'] ?? 0} GB · ${disk['percent'] ?? 0}%'),
+              if (load.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('负载  $load', style: const TextStyle(fontSize: 12)),
+              ],
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('关闭'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 分享：展示下载二维码
   void _showShareQr() {
     final qrUrl = '${ApiClient.instance.baseUrl}/qr.png';
@@ -384,6 +446,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               title: const Text('构建信息'),
               subtitle: Text(_buildLabel()),
             ),
+            if (_role == 'admin')
+              ListTile(
+                leading: const Icon(Icons.monitor_heart_outlined),
+                title: const Text('性能监控'),
+                subtitle: const Text('CPU · 内存 · 磁盘'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMetrics();
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.qr_code_2),
               title: const Text('分享下载'),
