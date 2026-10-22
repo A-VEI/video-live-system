@@ -33,9 +33,11 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final sp = await SharedPreferences.getInstance();
       final u = sp.getString('saved_phone') ?? '';
+      final s = sp.getString('saved_password') ?? '';
       if (mounted) {
         setState(() {
           if (u.isNotEmpty) _userCtrl.text = u;
+          if (s.isNotEmpty) _secretCtrl.text = s;
         });
       }
     } catch (_) {}

@@ -94,11 +94,11 @@ class ApiClient {
   String? _savedPhone;
 
   Future<void> _saveCredentials(String phone, String password) async {
-    // 不存口令明文；换线路用 JWT 自动登录
+    // 始终记住账号口令，避免每次手输（含换线路）
     _savedPhone = phone;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('saved_phone', phone);
-    await prefs.remove('saved_password');
+    await prefs.setString('saved_password', password);
     if (_token != null) {
       await prefs.setString('saved_token', _token!);
     }
@@ -108,21 +108,32 @@ class ApiClient {
     final prefs = await SharedPreferences.getInstance();
     final phone = prefs.getString('saved_phone');
     final token = prefs.getString('saved_token');
-    if (phone == null || token == null) return null;
-    _phone = phone;
-    _token = token;
-    _setupDio();
+    final password = prefs.getString('saved_password');
+    if (phone == null) return null;
+
+    // 1) token 还有效
+    if (token != null) {
+      _phone = phone;
+      _token = token;
+      _setupDio();
+      try {
+        final me = await this.me();
+        return {
+          'ok': true,
+          'phone': phone,
+          'name': me['name'] ?? phone,
+          'role': me['role'] ?? 'user',
+        };
+      } catch (_) {
+        // 继续用口令登录
+      }
+    }
+
+    // 2) 口令自动登录
+    if (password == null || password.isEmpty) return null;
     try {
-      final me = await this.me();
-      return {
-        'ok': true,
-        'phone': phone,
-        'name': me['name'] ?? phone,
-        'role': me['role'] ?? 'user',
-      };
+      return await login(phone, password);
     } catch (_) {
-      // token 失效则需重新输入口令
-      await clearAuth();
       return null;
     }
   }

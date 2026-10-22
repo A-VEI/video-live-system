@@ -70,11 +70,25 @@ class _AuthGateState extends State<AuthGate> {
           setState(() { _loggedIn = true; _loading = false; });
         }
       } catch (_) {
+        // token 失效 → 用记住的口令自动登录
         await api.clearAuth();
-        if (mounted) setState(() { _loggedIn = false; _loading = false; });
+        final saved = await api.trySavedLogin();
+        if (mounted) {
+          setState(() {
+            _loggedIn = saved != null && saved['ok'] == true;
+            _loading = false;
+          });
+        }
       }
     } else {
-      if (mounted) setState(() { _loading = false; });
+      // 未登录：尝试用记住的账号口令自动登录
+      final saved = await api.trySavedLogin();
+      if (mounted) {
+        setState(() {
+          _loggedIn = saved != null && saved['ok'] == true;
+          _loading = false;
+        });
+      }
     }
     _checkAppUpdate();
   }
